@@ -195,6 +195,38 @@
     throw new Error('"Delete" menu item not found');
   }
 
+  // Adds (or updates) a small badge next to the thread's name in the list.
+  // The label is drawn by CSS from a data attribute, so it never becomes part
+  // of the thread's text that listThreads() reads back.
+  const BADGE_CLASS = 'msf-badge';
+  function ensureBadgeStyle() {
+    if (document.getElementById('msf-badge-style')) return;
+    const style = document.createElement('style');
+    style.id = 'msf-badge-style';
+    style.textContent = `.${BADGE_CLASS}{display:inline-block;margin-left:6px;padding:0 6px;border-radius:8px;
+      font-size:11px;line-height:16px;font-weight:600;color:#fff;vertical-align:middle}
+      .${BADGE_CLASS}::after{content:attr(data-label)}`;
+    document.head.append(style);
+  }
+
+  function markThread(id, text, title, color = '#b3261e') {
+    const thread = findThread(id);
+    if (!thread) return false;
+    ensureBadgeStyle();
+    let badge = thread.element.querySelector(`.${BADGE_CLASS}`);
+    if (badge?.dataset.label === text && badge.title === title) return true;
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = BADGE_CLASS;
+      const anchor = thread.element.querySelector(NAME_SELECTORS.join(',')) ?? thread.link;
+      anchor.append(badge);
+    }
+    badge.dataset.label = text;
+    badge.title = title;
+    badge.style.background = color;
+    return true;
+  }
+
   // Read-only report of what the selectors match, for fixing them.
   function diagnose() {
     const threads = listThreads();
@@ -211,5 +243,5 @@
     };
   }
 
-  globalThis.MessagesDom = { listThreads, deleteThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { listThreads, deleteThread, markThread, diagnose, waitFor, sleep };
 })();

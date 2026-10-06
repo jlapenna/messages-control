@@ -13,6 +13,16 @@ function read() {
   return out;
 }
 
+// Only a customized prompt is stored, so prompt improvements reach everyone else.
+async function save() {
+  const values = read();
+  if (values.prompt === DEFAULT_PROMPT) {
+    delete values.prompt;
+    await chrome.storage.local.remove('prompt');
+  }
+  await chrome.storage.local.set(values);
+}
+
 async function init() {
   const s = await getSettings();
   for (const f of FIELDS) {
@@ -21,7 +31,7 @@ async function init() {
     else el.value = s[f];
   }
   $('save').addEventListener('click', async () => {
-    await chrome.storage.local.set(read());
+    await save();
     status('Saved.');
   });
   $('resetPrompt').addEventListener('click', () => ($('prompt').value = DEFAULT_PROMPT));
@@ -30,7 +40,7 @@ async function init() {
     status('Forgot seen threads. The next scan re-baselines from whatever is listed.');
   });
   $('test').addEventListener('click', async () => {
-    await chrome.storage.local.set(read());
+    await save();
     status('Classifying…');
     const [first, ...rest] = $('sample').value.split('\n');
     const thread = /^from:/i.test(first)

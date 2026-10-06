@@ -17,15 +17,19 @@ async function renderLog() {
     const li = document.createElement('li');
     const head = document.createElement('div');
     const tag = document.createElement('span');
-    tag.className = `tag ${e.action}`;
-    tag.textContent = e.action;
+    // Entries from before the rename say "would-delete".
+    const action = e.action === 'would-delete' ? 'spam' : e.action;
+    tag.className = `tag ${action}`;
+    tag.textContent = action;
     head.append(tag, ` ${e.name ?? ''} `);
     const when = document.createElement('span');
     when.className = 'muted';
     when.textContent = new Date(e.time).toLocaleString();
     head.append(when);
     li.append(head);
-    const detail = [e.confidence != null ? `${Math.round(e.confidence * 100)}%` : '', e.reason, e.method && `via ${e.method}`]
+    // Older entries stored the verdict's confidence rather than a spam score.
+    const score = e.score ?? (e.confidence != null ? (e.spam ? e.confidence : 1 - e.confidence) : null);
+    const detail = [score != null ? `spam score ${Math.round(score * 100)}%` : '', e.reason, e.method && `via ${e.method}`]
       .filter(Boolean)
       .join(' · ');
     if (detail) li.append(Object.assign(document.createElement('div'), { textContent: detail, className: 'muted' }));
@@ -44,10 +48,13 @@ async function renderScan() {
   for (const t of lastScan?.threads ?? []) {
     const li = document.createElement('li');
     const state = Object.assign(document.createElement('span'), {
-      className: `state ${String(t.state).split(' ')[0]}`,
+      className: `state ${String(t.state).split(' ').at(-1)}`,
       textContent: t.state,
     });
-    li.append(state, ` ${t.name}`, Object.assign(document.createElement('span'), { className: 'muted', textContent: t.timestamp ? ` · ${t.timestamp}` : '' }));
+    li.append(state, ` ${t.name}`, Object.assign(document.createElement('span'), {
+        className: 'muted',
+        textContent: [t.timestamp, t.score != null && `spam score ${Math.round(t.score * 100)}%`].filter(Boolean).map((x) => ` · ${x}`).join(''),
+      }));
     if (t.snippet) li.append(Object.assign(document.createElement('div'), { className: 'snippet muted', textContent: t.snippet }));
     ul.append(li);
   }
@@ -65,9 +72,9 @@ async function init() {
   }
   $('options').addEventListener('click', () => chrome.runtime.openOptionsPage());
   $('clear').addEventListener('click', async () => {
-    await chrome.storage.local.set({ log: [] });
-    await chrome.action.setBadgeText({ text: '' });
-    await renderLog();
+    const res = await chrome.runtime.sendMessage({ type: 'clearLog' });
+    if (!res?.ok) status(`Clear failed: ${res?.error ?? 'no response'}`);
+    await Promise.all([renderLog(), renderScan()]);
   });
   const runScan = async (includeSeen) => {
     try {

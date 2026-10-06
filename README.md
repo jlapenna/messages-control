@@ -12,7 +12,7 @@ ones judged spam are deleted.
 4. Open messages.google.com/web. The first scan marks existing threads as seen;
    only threads that arrive after that are classified.
 
-It starts in **dry run**: spam is logged as `would-delete` in the side panel, not
+It starts in **dry run**: spam is badged in the thread list and logged as `spam` in the side panel, not
 deleted. Untick dry run once the log looks right.
 
 ## Layout

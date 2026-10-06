@@ -1,6 +1,8 @@
 import { getSettings } from './settings.js';
 
 const LOG_LIMIT = 300;
+// Backstop for the model: a code-ish word near a 4-8 digit number.
+const OTP_RE = /\b(code|passcode|otp|one[- ]time|verification|verify|2fa|login|sign[- ]in)\b[\s\S]{0,60}\b\d{4,8}\b|\b\d{4,8}\b[\s\S]{0,60}\b(code|passcode|otp|verification)\b/i;
 
 async function classify(thread) {
   const s = await getSettings();
@@ -29,19 +31,42 @@ async function classify(thread) {
   const verdict = JSON.parse(json);
   const confidence = Number(verdict.confidence ?? 0);
   return {
+    otp: verdict.otp === true || OTP_RE.test(text),
     spam: verdict.spam === true && confidence >= s.threshold,
     rawSpam: verdict.spam === true,
     confidence,
+    // Probability-like spam score: confidence when the model says spam, its
+    // complement when it says not spam.
+    score: verdict.spam === true ? confidence : 1 - confidence,
     reason: String(verdict.reason ?? ''),
   };
 }
 
-async function appendLog(entry) {
-  const { log = [] } = await chrome.storage.local.get('log');
-  log.unshift({ time: Date.now(), ...entry });
-  await chrome.storage.local.set({ log: log.slice(0, LOG_LIMIT) });
-  const deleted = log.filter((e) => e.action === 'deleted').length;
-  await chrome.action.setBadgeText({ text: deleted ? String(deleted) : '' });
+// Log writes are read-modify-write, so run them one at a time; otherwise a
+// clear landing mid-append gets overwritten with the old entries.
+let logQueue = Promise.resolve();
+function withLog(fn) {
+  const run = logQueue.then(fn);
+  logQueue = run.catch(() => {});
+  return run;
+}
+
+function appendLog(entry) {
+  return withLog(async () => {
+    const { log = [] } = await chrome.storage.local.get('log');
+    log.unshift({ time: Date.now(), ...entry });
+    await chrome.storage.local.set({ log: log.slice(0, LOG_LIMIT) });
+    const deleted = log.filter((e) => e.action === 'deleted').length;
+    await chrome.action.setBadgeText({ text: deleted ? String(deleted) : '' });
+  });
+}
+
+function clearLog() {
+  return withLog(async () => {
+    await chrome.storage.local.set({ log: [] });
+    await chrome.storage.local.remove('lastScan');
+    await chrome.action.setBadgeText({ text: '' });
+  });
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -54,6 +79,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
           return sendResponse({ ok: true, verdict: await classify(msg.thread) });
         case 'log':
           await appendLog(msg.entry);
+          return sendResponse({ ok: true });
+        case 'clearLog':
+          await clearLog();
           return sendResponse({ ok: true });
         default:
           return sendResponse({ ok: false, error: `unknown message ${msg.type}` });
