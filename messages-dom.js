@@ -268,7 +268,7 @@
   // marks it read and can send a read receipt to the sender.
   // Runs one item of a thread's list-item menu ("Move to trash", "Archive")
   // and waits for the thread to leave the list.
-  async function menuAction(id, { attr, text, verb }) {
+  async function menuAction(id, { attr, text, verb, confirmDialog = null }) {
     const findAnyItem = () =>
       [...document.querySelectorAll(`[${attr}]`)].find(visible) ?? findMenuItem(text);
     // Never act while another menu is open: its item could be clicked
@@ -297,10 +297,14 @@
       throw new Error(`"${verb}" menu item not found`);
     }
     realClick(item);
-    // Some builds confirm in a dialog; these actions may not. Either the
-    // thread leaves the list, or a confirm button shows up first.
-    const next = await waitFor(() => (!findThread(id) ? 'gone' : findDialogButton(text)), 5000);
-    if (next && next !== 'gone') realClick(next);
+    if (confirmDialog) {
+      await confirmDialog();
+    } else {
+      // Some builds confirm in a dialog; these actions may not. Either the
+      // thread leaves the list, or a confirm button shows up first.
+      const next = await waitFor(() => (!findThread(id) ? 'gone' : findDialogButton(text)), 5000);
+      if (next && next !== 'gone') realClick(next);
+    }
     if (!(await waitFor(() => !findThread(id), 8000))) throw new Error(`Thread still listed after ${verb}`);
     return 'list-menu';
   }
@@ -309,6 +313,31 @@
   // page). There is deliberately no fallback that opens the thread: opening
   // marks it read and can send a read receipt to the sender.
   const deleteThread = (id) => menuAction(id, { attr: 'data-e2e-conversation-delete', text: DELETE_RE, verb: 'moving to trash' });
+
+  // Blocks the sender and reports the thread as spam. The real page asks in a
+  // dialog ("You won't receive calls or texts from <number>. This conversation
+  // will be moved to 'Spam & blocked.'") with a "Report spam" checkbox (on by
+  // default) and Cancel / OK.
+  const blockThread = (id) =>
+    menuAction(id, {
+      attr: 'data-e2e-conversation-menu-block',
+      text: /^block (&|and) report spam$/i,
+      verb: 'blocking',
+      confirmDialog: async () => {
+        const dialog = await waitFor(
+          () => document.querySelector('[data-e2e-block-and-report-spam-dialog]')?.closest('mat-dialog-container, [role="dialog"]'),
+          5000,
+        );
+        if (!dialog) throw new Error('Block & report dialog not found');
+        const report = dialog.querySelector('input[type="checkbox"]');
+        if (report && !report.checked) realClick(report);
+        const ok =
+          dialog.querySelector('[data-e2e-action-button-confirm]') ??
+          [...dialog.querySelectorAll('button')].find((b) => /^(ok|block)$/i.test(b.innerText.trim()));
+        if (!ok) throw new Error('Block & report OK button not found');
+        realClick(ok);
+      },
+    });
 
   // Archives a thread (keeps its history; Messages brings it back when a new
   // message arrives).
@@ -428,5 +457,5 @@
     };
   }
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, markThread, diagnose, waitFor, sleep };
 })();

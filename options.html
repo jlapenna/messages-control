@@ -3,6 +3,12 @@
 <head><meta charset="utf-8"><title>Messages Spam Filter settings</title><link rel="stylesheet" href="style.css"><style>body { max-width: 640px; margin: 24px auto; padding: 0 16px; }</style></head>
 <body>
   <h1>Messages Spam Filter settings</h1>
+  <label class="field">What to do with spam
+    <select id="spamAction">
+      <option value="block">Block &amp; report spam (moves it to Spam &amp; blocked; reports the number and recent texts to Google)</option>
+      <option value="trash">Move to trash</option>
+    </select>
+  </label>
   <label class="field">LLM endpoint (OpenAI-compatible chat completions)<input type="text" id="endpoint"></label>
   <label class="field">Model<input type="text" id="model"></label>
   <label class="field">API key (LiteLLM virtual key)<input type="password" id="apiKey" autocomplete="off"></label>

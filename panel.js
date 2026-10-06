@@ -87,7 +87,7 @@ async function init() {
           : extra.checkPictures
             ? 'Checking pictures…'
             : extra.trashSpam
-              ? 'Moving spam to trash…'
+              ? 'Acting on spam…'
               : includeSeen
                 ? 'Checking top threads…'
                 : 'Scanning…',
@@ -109,15 +109,15 @@ async function init() {
     const n = (lastScan?.threads ?? []).filter((t) => t.label === 'spam' && t.outcome?.startsWith('not deleted')).length;
     if (!trashArmed) {
       trashArmed = true;
-      $('trashSpam').textContent = `Confirm: trash ${n} spam`;
+      $('trashSpam').textContent = `Confirm: ${n} spam threads`;
       setTimeout(() => {
         trashArmed = false;
-        $('trashSpam').textContent = 'Trash existing spam';
+        $('trashSpam').textContent = 'Act on existing spam';
       }, 5000);
       return;
     }
     trashArmed = false;
-    $('trashSpam').textContent = 'Trash existing spam';
+    $('trashSpam').textContent = 'Act on existing spam';
     await runScan(false, { trashSpam: true });
   });
   $('diagnose').addEventListener('click', async () => {

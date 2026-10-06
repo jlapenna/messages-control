@@ -4,12 +4,12 @@
 <body>
   <h1>Messages Spam Filter</h1>
   <label class="row"><input type="checkbox" id="enabled"> Watch new threads</label>
-  <label class="row"><input type="checkbox" id="dryRun"> Dry run (never move to trash)</label>
+  <label class="row"><input type="checkbox" id="dryRun"> Dry run (never block or trash spam)</label>
   <div class="buttons">
     <button id="processAll" title="Load the whole conversation list, classify every thread, archive old notices, and move spam to trash unless dry run is on. Picture threads: use Check pictures now.">Process all messages</button>
     <button id="scan">Scan now</button>
     <button id="checkPictures" title="Open picture threads that are waiting, so their pictures get checked now. Opening marks them read.">Check pictures now</button>
-    <button id="trashSpam" title="Move every existing thread labelled spam to trash. Needs dry run off.">Trash existing spam</button>
+    <button id="trashSpam" title="Block &amp; report (or trash, per Settings) every existing thread labelled spam. Needs dry run off.">Act on existing spam</button>
     <button id="checkTop" title="Re-check the top threads as if they were new. Deletes spam among them unless dry run is on.">Check top threads</button>
     <button id="diagnose">Diagnose page</button>
     <button id="options">Settings</button>

@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, markThread, diagnose } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, markThread, diagnose } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -253,10 +253,14 @@
       return { row: fromVerdict(t, v, `${not}: thread changed since it was checked`), done: false };
     }
     try {
-      const method = archive ? await archiveThread(t.id) : await deleteThread(t.id);
-      return { row: { ...fromVerdict(t, v, archive ? outcome.replace('archiving', 'archived') : 'deleted'), method }, done: true };
+      // Spam is blocked & reported or trashed, per settings (read fresh).
+      const block = !archive && now.spamAction === 'block';
+      const method = archive ? await archiveThread(t.id) : block ? await blockThread(t.id) : await deleteThread(t.id);
+      const done = archive ? outcome.replace('archiving', 'archived') : block ? 'blocked & reported' : 'deleted';
+      return { row: { ...fromVerdict(t, v, done), method }, done: true };
     } catch (err) {
-      return { row: fromVerdict(t, v, `${archive ? 'archive' : 'delete'} failed: ${err.message}`), done: true };
+      const what = archive ? 'archive' : now.spamAction === 'block' ? 'block & report' : 'delete';
+      return { row: fromVerdict(t, v, `${what} failed: ${err.message}`), done: true };
     }
   }
 
@@ -294,7 +298,7 @@
     try {
       const { settings } = await send({ type: 'getSettings' });
       if (!settings.enabled && !includeSeen && !checkPictures && !trashSpam && !processAll) return 'Watching is off.';
-      if (trashSpam && settings.dryRun) return 'Dry run is on; turn it off to move spam to trash.';
+      if (trashSpam && settings.dryRun) return 'Dry run is on; turn it off to act on spam.';
       forceOpen = checkPictures;
       openPictures = settings.openPictureThreads;
       let threads = listThreads();
@@ -437,7 +441,7 @@
         if (archived) notes.push(`archived ${archived} old notices`);
       }
 
-      if (processAll && settings.dryRun) notes.push('dry run is on, so spam was labelled but not trashed');
+      if (processAll && settings.dryRun) notes.push('dry run is on, so spam was labelled but not blocked or trashed');
       if (trashSpam || (processAll && !settings.dryRun)) {
         verdicts = await loadVerdicts();
         const spam = threads.filter((t) => {
@@ -450,11 +454,11 @@
           const res = await processThread(t, { isNew: true, settings, verdicts, explicit: true, recheck: true });
           rows.set(t.id, res.row);
           await log(res.row);
-          if (res.row.outcome === 'deleted') moved++;
+          if (['deleted', 'blocked & reported'].includes(res.row.outcome)) moved++;
           await publish('Moving spam to trash…');
           if (res.abort) break;
         }
-        notes.push(`moved ${moved} of ${spam.length} spam threads to trash`);
+        notes.push(`${settings.spamAction === 'block' ? 'blocked & reported' : 'moved to trash'} ${moved} of ${spam.length} spam threads`);
       }
 
       // In "Process all messages" the whole backlog was just classified; what

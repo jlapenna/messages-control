@@ -56,9 +56,12 @@ Reply with JSON only: {"spam": true|false, "confidence": 0-1, "reason": "short"}
 
 export const DEFAULTS = {
   enabled: true,
-  // Never move anything to trash; log what would be trashed instead. Turn off
+  // Never trash or block anything; log what would happen instead. Turn off
   // once the log looks right. (Archiving old notices still happens.)
   dryRun: true,
+  // What happens to spam: 'block' (block the sender and report the thread as
+  // spam; it moves to Spam & blocked) or 'trash'.
+  spamAction: 'block',
   endpoint: 'https://llm.jlapenna.net/v1/chat/completions',
   model: 'default',
   apiKey: '',

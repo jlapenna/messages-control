@@ -2,7 +2,7 @@ import { DEFAULTS, DEFAULT_PROMPT, getSettings } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (text) => ($('status').textContent = text);
-const FIELDS = ['endpoint', 'model', 'apiKey', 'threshold', 'topN', 'skipNamedContacts', 'openPictureThreads', 'archiveOldNotices', 'prompt'];
+const FIELDS = ['spamAction', 'endpoint', 'model', 'apiKey', 'threshold', 'topN', 'skipNamedContacts', 'openPictureThreads', 'archiveOldNotices', 'prompt'];
 
 // An empty number field reads as 0, which would make every spam verdict
 // deletable (threshold) or nothing count as new (topN). Clamp to sane ranges
@@ -14,6 +14,7 @@ function read() {
   for (const f of FIELDS) {
     const el = $(f);
     if (el.type === 'checkbox') out[f] = el.checked;
+    else if (el.tagName === 'SELECT') out[f] = el.value;
     else if (el.type === 'number') {
       const n = el.value.trim() === '' ? NaN : Number(el.value);
       const [lo, hi] = RANGES[f];
