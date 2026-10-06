@@ -12,7 +12,7 @@ ones judged spam are deleted.
 4. Open messages.google.com/web. The first scan marks existing threads as seen;
    only threads that arrive after that are classified.
 
-It starts in **dry run**: spam is logged as `would-delete` in the popup, not
+It starts in **dry run**: spam is logged as `would-delete` in the side panel, not
 deleted. Untick dry run once the log looks right.
 
 ## Layout
@@ -21,10 +21,10 @@ deleted. Untick dry run once the log looks right.
   `chrome.*` APIs, so it can move into an Electron preload as-is.
 - `content.js`: new-thread detection and the classify → delete policy.
 - `background.js`: LLM call and the activity log.
-- `popup.*`, `options.*`, `settings.js`: UI and settings.
+- `panel.*`, `options.*`, `settings.js`: UI and settings.
 
 ## When Google changes the UI
 
-Selectors in `messages-dom.js` are guesses with fallbacks. Popup → Diagnose page
+Selectors in `messages-dom.js` are guesses with fallbacks. Side panel → Diagnose page
 shows what matched: the thread count, sample names and snippets, and whether the
 per-thread menu button was found.

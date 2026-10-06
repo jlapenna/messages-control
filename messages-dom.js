@@ -112,13 +112,17 @@
     const buttons = [...document.querySelectorAll('button')].filter(
       (b) => visible(b) && !(list && list.contains(b)) && MENU_BUTTON_RE.test(label(b)),
     );
-    const inHeader = buttons.find((b) => b.closest('mws-conversation-header, mws-header, header'));
-    return inHeader ?? buttons.find((b) => /conversation|options/i.test(label(b))) ?? null;
+    return buttons.find((b) => b.closest('mws-conversation-header, mws-header, header')) ?? null;
   }
 
-  async function confirmDelete(id) {
+  const isOpen = (id) => threadId(location.pathname) === id;
+
+  async function confirmDelete(id, requireOpen) {
     const item = await waitFor(() => findMenuItem(/^delete$/i), 3000);
     if (!item) return false;
+    // Re-check right before the irreversible click: never delete whatever
+    // conversation happens to be open instead of the target.
+    if (requireOpen && !isOpen(id)) throw new Error(`Thread ${id} is no longer the open conversation`);
     realClick(item);
     const confirm = await waitFor(() => findDialogButton(/^delete$/i), 3000);
     if (!confirm) throw new Error('Delete confirmation dialog not found');
@@ -150,11 +154,13 @@
     thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} vanished`);
     realClick(thread.link);
-    await waitFor(() => location.pathname.includes(id), 5000);
+    if (!(await waitFor(() => isOpen(id), 5000))) {
+      throw new Error(`Could not open thread ${id}; not deleting`);
+    }
     const headerBtn = await waitFor(headerMenuButton, 5000);
     if (!headerBtn) throw new Error('Conversation menu button not found');
     realClick(headerBtn);
-    if (await confirmDelete(id)) return 'header-menu';
+    if (await confirmDelete(id, true)) return 'header-menu';
     closeMenus();
     throw new Error('"Delete" menu item not found');
   }

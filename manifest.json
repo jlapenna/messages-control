@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "description": "Classifies each new Google Messages thread with llm.jlapenna.net and deletes the ones judged spam.",
   "permissions": [
-    "storage"
+    "storage",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://messages.google.com/*",
@@ -27,8 +28,10 @@
     }
   ],
   "action": {
-    "default_popup": "popup.html",
     "default_title": "Messages Spam Filter"
   },
-  "options_page": "options.html"
+  "options_page": "options.html",
+  "side_panel": {
+    "default_path": "panel.html"
+  }
 }
