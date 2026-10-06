@@ -72,7 +72,9 @@
 
   // Opening a thread moves the user's view, so existing picture threads are
   // only opened while the Messages tab is in the background.
-  const canOpen = (isNew) => isNew || document.visibilityState === 'hidden';
+  // forceOpen: the user pressed "Check pictures now".
+  let forceOpen = false;
+  const canOpen = (isNew) => isNew || forceOpen || document.visibilityState === 'hidden';
   let openPictures = true; // refreshed from settings at the start of each scan
   const needsOpen = (t) => openPictures && isMediaSnippet(t.text);
 
@@ -198,8 +200,11 @@
   }
 
   // Returns a one-line summary of what the scan did. With includeSeen, the
-  // top threads are treated as new (for testing on a backlog).
-  async function scan({ includeSeen = false } = {}) {
+  // top threads are treated as new (for testing on a backlog). checkPictures
+  // opens every pending picture thread now; trashSpam moves existing threads
+  // already labelled spam (at or above the threshold) to trash. Both are
+  // explicit user actions from the side panel.
+  async function scan({ includeSeen = false, checkPictures = false, trashSpam = false } = {}) {
     if (scanning) {
       rescan = true;
       return 'A scan is already running.';
@@ -207,7 +212,9 @@
     scanning = true;
     try {
       const { settings } = await send({ type: 'getSettings' });
-      if (!settings.enabled && !includeSeen) return 'Watching is off.';
+      if (!settings.enabled && !includeSeen && !checkPictures && !trashSpam) return 'Watching is off.';
+      if (trashSpam && settings.dryRun) return 'Dry run is on; turn it off to move spam to trash.';
+      forceOpen = checkPictures;
       openPictures = settings.openPictureThreads;
       const threads = listThreads();
       if (!threads.length) return saveScan('No conversations found on the page. Click Diagnose page.', []);
@@ -259,7 +266,11 @@
           (!needsOpen(t) || canOpen(false)) &&
           (attempts.get(t.id) ?? 0) < MAX_ATTEMPTS,
       );
-      for (const t of unlabelled.slice(0, LABEL_BATCH)) {
+      // "Check pictures now" handles every pending picture thread, not a batch.
+      const batch = checkPictures
+        ? [...unlabelled.filter(needsOpen), ...unlabelled.filter((t) => !needsOpen(t)).slice(0, LABEL_BATCH)]
+        : unlabelled.slice(0, LABEL_BATCH);
+      for (const t of batch) {
         const res = await processThread(t, { isNew: false, settings, verdicts });
         rows.set(t.id, res.row);
         await log(res.row);
@@ -281,7 +292,25 @@
         }
       }
 
-      const pending = unlabelled.length - Math.min(unlabelled.length, LABEL_BATCH);
+      if (trashSpam) {
+        verdicts = await loadVerdicts();
+        const spam = threads.filter((t) => {
+          const v = !rows.has(t.id) && cached(verdicts, t);
+          return v && v.label === 'spam' && v.score >= settings.threshold;
+        });
+        let moved = 0;
+        for (const t of spam) {
+          // isNew: true makes decide() act on it like a newly arrived thread.
+          const res = await processThread(t, { isNew: true, settings, verdicts });
+          rows.set(t.id, res.row);
+          await log(res.row);
+          if (res.row.outcome === 'deleted') moved++;
+          await publish('Moving spam to trash…');
+        }
+        notes.push(`moved ${moved} of ${spam.length} spam threads to trash`);
+      }
+
+      const pending = unlabelled.length - batch.length;
       if (pending) {
         notes.push(`${pending} existing threads still to label`);
         rescan = true;
@@ -292,6 +321,7 @@
       console.warn('[spam-filter] scan failed', err);
       return `Scan failed: ${err.message}`;
     } finally {
+      forceOpen = false;
       scanning = false;
       if (rescan) {
         rescan = false;
@@ -320,7 +350,9 @@
     if (msg.type === 'diagnose') {
       sendResponse({ ok: true, report: diagnose() });
     } else if (msg.type === 'scanNow') {
-      scan({ includeSeen: !!msg.includeSeen }).then((summary) => sendResponse({ ok: true, summary }));
+      scan({ includeSeen: !!msg.includeSeen, checkPictures: !!msg.checkPictures, trashSpam: !!msg.trashSpam }).then(
+        (summary) => sendResponse({ ok: true, summary }),
+      );
       return true;
     }
   });

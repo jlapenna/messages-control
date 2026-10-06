@@ -78,11 +78,11 @@ async function init() {
     if (!res?.ok) status(`Clear failed: ${res?.error ?? 'no response'}`);
     await Promise.all([renderLog(), renderScan()]);
   });
-  const runScan = async (includeSeen) => {
+  const runScan = async (includeSeen, extra = {}) => {
     try {
       const tab = await messagesTab();
       status(includeSeen ? 'Checking top threads…' : 'Scanning…');
-      const res = await chrome.tabs.sendMessage(tab.id, { type: 'scanNow', includeSeen });
+      const res = await chrome.tabs.sendMessage(tab.id, { type: 'scanNow', includeSeen, ...extra });
       status(res?.summary ?? 'No response from the Messages tab. Reload it.');
     } catch (err) {
       status(`${err.message} (reload the Messages tab if the extension was just reloaded)`);
@@ -90,6 +90,25 @@ async function init() {
   };
   $('scan').addEventListener('click', () => runScan(false));
   $('checkTop').addEventListener('click', () => runScan(true));
+  $('checkPictures').addEventListener('click', () => runScan(false, { checkPictures: true }));
+  // Two clicks: the first shows how many threads would move.
+  let trashArmed = false;
+  $('trashSpam').addEventListener('click', async () => {
+    const { lastScan } = await chrome.storage.local.get('lastScan');
+    const n = (lastScan?.threads ?? []).filter((t) => t.label === 'spam' && t.outcome?.startsWith('not deleted')).length;
+    if (!trashArmed) {
+      trashArmed = true;
+      $('trashSpam').textContent = `Confirm: trash ${n} spam`;
+      setTimeout(() => {
+        trashArmed = false;
+        $('trashSpam').textContent = 'Trash existing spam';
+      }, 5000);
+      return;
+    }
+    trashArmed = false;
+    $('trashSpam').textContent = 'Trash existing spam';
+    await runScan(false, { trashSpam: true });
+  });
   $('diagnose').addEventListener('click', async () => {
     try {
       const tab = await messagesTab();

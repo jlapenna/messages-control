@@ -187,14 +187,7 @@
     );
   }
 
-  // The "⋮" button in the open conversation's header.
-  function headerMenuButton() {
-    const list = document.querySelector('mws-conversations-list');
-    const buttons = [...document.querySelectorAll('button')].filter(
-      (b) => visible(b) && !(list && list.contains(b)) && MENU_BUTTON_RE.test(label(b)),
-    );
-    return buttons.find((b) => b.closest('mws-conversation-header, mws-header, header')) ?? null;
-  }
+
 
   const isOpen = (id) => threadId(location.pathname) === id;
 
@@ -204,12 +197,9 @@
   const findDeleteItem = () =>
     [...document.querySelectorAll('[data-e2e-conversation-delete]')].find(visible) ?? findMenuItem(DELETE_RE);
 
-  async function confirmDelete(id, requireOpen) {
+  async function confirmDelete(id) {
     const item = await waitFor(findDeleteItem, 3000);
     if (!item) return false;
-    // Re-check right before the click: never delete whatever conversation
-    // happens to be open instead of the target.
-    if (requireOpen && !isOpen(id)) throw new Error(`Thread ${id} is no longer the open conversation`);
     realClick(item);
     // Some builds confirm in a dialog; moving to trash may not. Either the
     // thread leaves the list, or a confirm button shows up first.
@@ -228,31 +218,21 @@
 
   // Deletes a thread: via the list item's menu, else by opening it and using
   // the conversation header menu. Returns the method used.
+  // Moves a thread to trash through its list-item menu (verified on the real
+  // page). There is deliberately no fallback that opens the thread: opening
+  // marks it read and can send a read receipt to the sender.
   async function deleteThread(id) {
-    let thread = findThread(id);
+    const thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} not in list`);
-
     hover(thread.element);
     const listBtn = await waitFor(() => listMenuButton(findThread(id) ?? thread), 1500);
-    if (listBtn) {
-      realClick(listBtn);
-      if (await confirmDelete(id)) return 'list-menu';
-      closeMenus();
-    }
-
-    thread = findThread(id);
-    if (!thread) throw new Error(`Thread ${id} vanished`);
-    realClick(thread.link);
-    if (!(await waitFor(() => isOpen(id), 5000))) {
-      throw new Error(`Could not open thread ${id}; not deleting`);
-    }
-    const headerBtn = await waitFor(headerMenuButton, 5000);
-    if (!headerBtn) throw new Error('Conversation menu button not found');
-    realClick(headerBtn);
-    if (await confirmDelete(id, true)) return 'header-menu';
+    if (!listBtn) throw new Error('Thread menu button not found');
+    realClick(listBtn);
+    if (await confirmDelete(id)) return 'list-menu';
     closeMenus();
     throw new Error('"Move to trash" menu item not found');
   }
+
 
   // Adds (or updates) a small badge next to the thread's name in the list.
   // The label is drawn by CSS from a data attribute, so it never becomes part
@@ -361,7 +341,6 @@
       sample: threads.slice(0, 5).map(({ id, name, snippet, timestamp, recent, unread }) => ({ id, name, snippet, timestamp, recent, unread })),
       firstItemButtons: first ? [...first.element.querySelectorAll('button')].map(label) : [],
       firstItemMenuButtonFound: first ? !!listMenuButton(first) : false,
-      headerMenuButton: headerMenuButton() ? label(headerMenuButton()) : null,
     };
   }
 
