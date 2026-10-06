@@ -115,7 +115,9 @@ function appendLog(entry) {
     const { log = [] } = await chrome.storage.local.get('log');
     log.unshift({ time: Date.now(), ...entry });
     await chrome.storage.local.set({ log: log.slice(0, LOG_LIMIT) });
-    const deleted = log.filter((e) => e.action === 'deleted').length;
+    const deleted = log.filter(
+      (e) => e.outcome === 'deleted' || e.outcome?.startsWith('moved to trash') || e.action === 'deleted',
+    ).length;
     await chrome.action.setBadgeText({ text: deleted ? String(deleted) : '' });
   });
 }

@@ -5,6 +5,7 @@
 // fallbacks. diagnose() reports what matched so they can be fixed quickly.
 (() => {
   const CONVERSATION_LINK = 'a[href*="/web/conversations/"]';
+  const CONVERSATION_ROW = 'mws-conversation-list-item, a[data-e2e-conversation]';
   // List timestamps: "Now", "5 min", "2:14 PM" for today; "Mon", "Sep 3",
   // "9/3/25" for older threads.
   const RECENT_RE = /^(now|just now|\d+\s*mins?(utes?)?( ago)?|\d{1,2}:\d{2}(\s*[ap]\.?m\.?)?)$/i;
@@ -44,6 +45,27 @@
     }
     if (wd) return ((today.getDay() - WEEKDAYS.indexOf(wd[1]) + 7) % 7) || 7;
     return null;
+  }
+
+  // Estimated time of the latest message: exact for today ("Now", "34 min",
+  // "9:37 AM"), midnight of the day otherwise. Null if unreadable.
+  function messageTime(ts, now = new Date()) {
+    if (!ts) return null;
+    if (isRecent(ts)) {
+      if (/\bnow\b/i.test(ts)) return now.getTime();
+      const min = ts.match(/\b(\d+)\s*min/i);
+      if (min) return now.getTime() - Number(min[1]) * 60000;
+      const clock = ts.match(/\b(\d{1,2}):(\d{2})\s*([ap])?/i);
+      if (clock) {
+        let h = Number(clock[1]) % 12;
+        if (clock[3]?.toLowerCase() === 'p') h += 12;
+        if (!clock[3] && Number(clock[1]) >= 12) h = Number(clock[1]);
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, Number(clock[2])).getTime();
+      }
+    }
+    const days = ageDays(ts, now);
+    if (days == null) return null;
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() - days).getTime();
   }
 
   // "Monday Mon" → "Monday"; "2:14 PM\n2:14 PM" → "2:14 PM".
@@ -146,6 +168,7 @@
         timestamp,
         recent: isRecent(timestamp),
         ageDays: ageDays(timestamp),
+        msgTime: messageTime(timestamp),
         // No snippet element means no text (e.g. a reaction or picture), not the
         // row's whole text, which would include the name and timestamp.
         text: snippet,
@@ -160,6 +183,28 @@
   }
 
   const findThread = (id) => listThreads().find((t) => t.id === id) ?? null;
+
+  // The list renders lazily as it scrolls. Scroll it to the end until no more
+  // threads appear, put the scroll position back, and return every thread.
+  async function loadAllThreads({ maxRounds = 80 } = {}) {
+    const first = document.querySelector(CONVERSATION_ROW);
+    let scroller = first?.parentElement;
+    while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
+    if (!scroller) return listThreads();
+    const top = scroller.scrollTop;
+    let count = -1;
+    let stable = 0;
+    for (let i = 0; i < maxRounds && stable < 3; i++) {
+      scroller.scrollTop = scroller.scrollHeight;
+      await sleep(400);
+      const n = listThreads().length;
+      stable = n === count ? stable + 1 : 0;
+      count = n;
+    }
+    const all = listThreads();
+    scroller.scrollTop = top;
+    return all;
+  }
 
   function findMenuItem(re) {
     const items = document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, .mat-menu-item');
@@ -197,8 +242,15 @@
   const findDeleteItem = () =>
     [...document.querySelectorAll('[data-e2e-conversation-delete]')].find(visible) ?? findMenuItem(DELETE_RE);
 
-  async function confirmDelete(id) {
-    const item = await waitFor(findDeleteItem, 3000);
+  // Clicks "Move to trash" in the given menu panel (or, if the page didn't
+  // link the button to a panel, the only delete item showing, which the
+  // caller has checked wasn't there before it opened the menu).
+  async function confirmDelete(id, panel) {
+    const inPanel = () =>
+      panel &&
+      ([...panel.querySelectorAll('[data-e2e-conversation-delete]')].find(visible) ??
+        [...panel.querySelectorAll('[role="menuitem"], button')].find((el) => visible(el) && DELETE_RE.test(el.innerText.trim())));
+    const item = await waitFor(() => (panel ? inPanel() : findDeleteItem()), 3000);
     if (!item) return false;
     realClick(item);
     // Some builds confirm in a dialog; moving to trash may not. Either the
@@ -212,6 +264,7 @@
   }
 
 
+
   function closeMenus() {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   }
@@ -222,16 +275,27 @@
   // page). There is deliberately no fallback that opens the thread: opening
   // marks it read and can send a read receipt to the sender.
   async function deleteThread(id) {
+    // Never act while another menu is open: its "Move to trash" could be
+    // clicked instead of the target's.
+    if (findDeleteItem()) {
+      closeMenus();
+      if (!(await waitFor(() => !findDeleteItem(), 1500))) throw new Error('Another menu is open; not deleting');
+    }
     const thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} not in list`);
     hover(thread.element);
-    const listBtn = await waitFor(() => listMenuButton(findThread(id) ?? thread), 1500);
+    const listBtn = await waitFor(() => (findThread(id) ? listMenuButton(findThread(id)) : null), 1500);
     if (!listBtn) throw new Error('Thread menu button not found');
     realClick(listBtn);
-    if (await confirmDelete(id)) return 'list-menu';
+    // The real page links the open menu to its button (aria-controls).
+    await waitFor(() => listBtn.getAttribute('aria-expanded') === 'true', 1500);
+    const panelId = listBtn.getAttribute('aria-controls');
+    const panel = panelId ? document.getElementById(panelId) : null;
+    if (await confirmDelete(id, panel)) return 'list-menu';
     closeMenus();
     throw new Error('"Move to trash" menu item not found');
   }
+
 
 
   // Adds (or updates) a small badge next to the thread's name in the list.
@@ -344,5 +408,5 @@
     };
   }
 
-  globalThis.MessagesDom = { ageDays, listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose, waitFor, sleep };
 })();

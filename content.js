@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   const VERDICT_LIMIT = 1000;
   const MAX_ATTEMPTS = 3;
@@ -12,6 +12,8 @@
   const attempts = new Map();
   let scanning = false;
   let rescan = false;
+  // Options of requests that arrived while a scan was running, merged.
+  let pendingOpts = {};
 
   const pct = (x) => `${Math.round(x * 100)}%`;
 
@@ -58,8 +60,16 @@
   // Bump when classification changes enough that old verdicts should be redone
   // (2: spam_probability scoring and picture checks; 3: notifications).
   const VERDICT_VERSION = 3;
-  const cached = (verdicts, t) =>
-    verdicts[t.id]?.text === t.text && verdicts[t.id].version === VERDICT_VERSION ? verdicts[t.id] : null;
+  // A verdict is reused only for the same preview text and the same latest
+  // message: picture threads all say "Picture", so a newer message (by list
+  // timestamp, 5 minutes' slack for "34 min" drifting) invalidates it.
+  const STALE_SLACK_MS = 5 * 60000;
+  const cached = (verdicts, t) => {
+    const v = verdicts[t.id];
+    if (!v || v.text !== t.text || v.version !== VERDICT_VERSION) return null;
+    if (t.msgTime != null && v.msgTime != null && t.msgTime > v.msgTime + STALE_SLACK_MS) return null;
+    return v;
+  };
 
   function badge(id, v) {
     if (v.label === 'spam') markThread(id, `Spam ${pct(v.score)}`, v.reason);
@@ -95,6 +105,7 @@
       score: verdict.score,
       reason: verdict.reason,
       text: thread.text,
+      msgTime: thread.msgTime,
       media: payload.media
         ? verdict.pictures
           ? `${verdict.pictures} picture${verdict.pictures === 1 ? '' : 's'} checked`
@@ -178,6 +189,13 @@
     }
     const { outcome, del } = decide(v, { isNew, settings, thread: t });
     if (!del) return { row: fromVerdict(t, v, outcome), done: true };
+    // Settings were read when the scan started; the user may have switched on
+    // dry run or off watching since. Check again right before each trash.
+    const { settings: now } = await send({ type: 'getSettings' });
+    if (now.dryRun || !now.enabled) {
+      const why = now.dryRun ? 'dry run turned on' : 'watching turned off';
+      return { row: fromVerdict(t, v, `not deleted: ${why}`), done: false, abort: true };
+    }
     try {
       const method = await deleteThread(t.id);
       return { row: { ...fromVerdict(t, v, outcome.startsWith('moving') ? outcome.replace('moving', 'moved') : 'deleted'), method }, done: true };
@@ -204,11 +222,13 @@
   // opens every pending picture thread now; trashSpam moves existing threads
   // already labelled spam (at or above the threshold) to trash. Both are
   // explicit user actions from the side panel.
-  async function scan({ includeSeen = false, checkPictures = false, trashSpam = false } = {}) {
+  async function scan(opts = {}) {
     if (scanning) {
       rescan = true;
-      return 'A scan is already running.';
+      pendingOpts = { ...pendingOpts, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v)) };
+      return 'A scan is running; this request will run right after it.';
     }
+    const { includeSeen = false, checkPictures = false, trashSpam = false } = opts;
     scanning = true;
     try {
       const { settings } = await send({ type: 'getSettings' });
@@ -216,28 +236,43 @@
       if (trashSpam && settings.dryRun) return 'Dry run is on; turn it off to move spam to trash.';
       forceOpen = checkPictures;
       openPictures = settings.openPictureThreads;
-      const threads = listThreads();
+      let threads = listThreads();
       if (!threads.length) return saveScan('No conversations found on the page. Click Diagnose page.', []);
 
       let verdicts = await loadVerdicts();
+      const publishEarly = (summary) => saveScan(summary, listThreads().map((t) => knownRow(t, { settings, verdicts })));
       for (const t of threads) {
         const v = cached(verdicts, t);
         if (v) badge(t.id, v);
       }
 
-      const { seen, baselined } = await loadSeen();
+      let { seen, baselined } = await loadSeen();
       const notes = [];
-      if (!baselined && !includeSeen) {
-        // First run: everything already here is history, not new mail.
-        await markSeen(threads.map((t) => t.id));
-        await log({ label: 'info', outcome: `started watching: ${threads.length} existing threads will never be deleted` });
-        notes.push(`first run, ${threads.length} existing threads marked as not new`);
+      const { fullSweep } = await chrome.storage.local.get('fullSweep');
+      if ((!baselined || !fullSweep) && !includeSeen) {
+        // Everything already in the conversation list is history, not new
+        // mail, including threads the list hasn't rendered yet: load it all
+        // first. Installs baselined before this did it once from the visible
+        // part only, so they sweep once too (after nothing new is pending).
+        // Unseen threads from today at the top may be genuinely new: leave
+        // those for the new-thread check below.
+        const maybeNew = new Set(
+          baselined ? threads.slice(0, settings.topN).filter((t) => !seen[t.id] && t.recent).map((t) => t.id) : [],
+        );
+        const all = await loadAllThreads();
+        await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id)));
+        await chrome.storage.local.set({ fullSweep: true });
+        await log({ label: 'info', outcome: `loaded the whole list: ${all.length} existing threads will never be auto-deleted` });
+        notes.push(`${all.length} existing threads marked as not new`);
+        if (!baselined) return publishEarly(`First run: ${all.length} existing threads marked as not new. Only new threads will be checked.`);
+        ({ seen, baselined } = await loadSeen());
+        threads = listThreads(); // scrolling may have re-rendered rows
       }
 
       // New threads arrive at the top. Unseen threads dated before today
       // lazy-loaded after the baseline; they are history, not new mail.
       const top = threads.slice(0, settings.topN);
-      const fresh = includeSeen ? top : baselined ? top.filter((t) => !seen[t.id] && t.recent) : [];
+      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : top.filter((t) => !seen[t.id] && t.recent);
       const stale = includeSeen ? [] : threads.filter((t) => !seen[t.id] && !fresh.includes(t));
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
@@ -253,6 +288,7 @@
         await log(res.row);
         if (res.done) await markSeen([t.id]);
         await publish('Checking new threads…');
+        if (res.abort) break;
       }
 
       // Display-only labels for existing threads; decide() never deletes
@@ -278,7 +314,7 @@
       }
 
       // Old notices and codes that were labelled in an earlier scan.
-      if (settings.trashOldNotices && !settings.dryRun) {
+      if (settings.enabled && settings.trashOldNotices && !settings.dryRun) {
         verdicts = await loadVerdicts();
         const expired = threads.filter((t) => {
           const v = !rows.has(t.id) && cached(verdicts, t);
@@ -289,6 +325,7 @@
           rows.set(t.id, res.row);
           await log(res.row);
           await publish('Moving old notices to trash…');
+        if (res.abort) break;
         }
       }
 
@@ -306,6 +343,7 @@
           await log(res.row);
           if (res.row.outcome === 'deleted') moved++;
           await publish('Moving spam to trash…');
+        if (res.abort) break;
         }
         notes.push(`moved ${moved} of ${spam.length} spam threads to trash`);
       }
@@ -325,7 +363,9 @@
       scanning = false;
       if (rescan) {
         rescan = false;
-        setTimeout(() => scan(), 500);
+        const next = pendingOpts;
+        pendingOpts = {};
+        setTimeout(() => scan(next), 500);
       }
     }
   }
