@@ -293,14 +293,18 @@
       if (!list) throw new Error('Message list not found');
       await sleep(1500); // let pictures load
       // Real page (2026-10): each message is an mws-message-wrapper; its text
-      // is mws-text-message-part (nested elements repeat it, so read that one
-      // only), pictures are [data-e2e-message-image] img with same-origin blob:
+      // is mws-text-message-part (nested [data-e2e-text-message-content]
+      // repeats it, so read only the part), pictures are [data-e2e-message-image] img with same-origin blob:
       // URLs. Banners like "Texting with ..." are tombstone wrappers.
+      // Repeated sends are signal, so only the fallback (whose combined
+      // selector matches nested copies of one message) is deduplicated.
       const wrappers = [...list.querySelectorAll('mws-message-wrapper')];
-      const parts = wrappers.length
-        ? wrappers.flatMap((w) => [...w.querySelectorAll('mws-text-message-part')])
-        : [...list.querySelectorAll('mws-text-message-part, [data-e2e-text-message-content]')];
-      const texts = [...new Set(parts.map((el) => el.innerText.trim()).filter(Boolean))].slice(-maxTexts);
+      const textOfAll = (els) => els.map((el) => el.innerText.trim()).filter(Boolean);
+      const texts = (
+        wrappers.length
+          ? textOfAll(wrappers.flatMap((w) => [...w.querySelectorAll('mws-text-message-part')]))
+          : [...new Set(textOfAll([...list.querySelectorAll('mws-text-message-part, [data-e2e-text-message-content]')]))]
+      ).slice(-maxTexts);
       const messageImgs = [...list.querySelectorAll('[data-e2e-message-image] img')];
       const imgs = (messageImgs.length ? messageImgs : [...list.querySelectorAll('img')])
         .filter((img) => !img.closest('mws-avatar, [class*="avatar"]') && Math.max(img.naturalWidth, img.width) >= 100)
