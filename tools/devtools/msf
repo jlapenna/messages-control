@@ -23,7 +23,7 @@ fi
 "$node" -e 0 || { echo "cannot run Windows node.exe (WSL interop)" >&2; exit 1; }
 
 mkdir -p "$win_dir"
-cp "$here"/daemon.mjs "$here"/call.mjs "$win_dir"/
+cp "$here"/daemon.mjs "$here"/call.mjs "$here"/channel.mjs "$win_dir"/
 win() { (cd "$win_dir" && "$node" "$@" | tr -d '\r'); }
 up() { win call.mjs targets >/dev/null 2>&1; }
 

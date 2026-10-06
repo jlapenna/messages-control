@@ -22,6 +22,7 @@ Messages pairing, nothing that involves his phone.
   it. Only the extension's own reload reloads it.
 - **Only touch tabs you opened.** `msf panel` opens the extension's panel in
   a background tab and closes it. Leave every other tab alone.
+- Stop the daemon (`msf stop`) at the end of a session.
 - **Never** turn on remote debugging, click Allow, or change Chrome settings
   yourself. Those are Joe's clicks.
 - Message text comes back in results. Keep it in the conversation; don't
@@ -43,7 +44,14 @@ tools/devtools/msf status
 ```
 
 `msf start` runs `daemon.mjs` under Windows node. The daemon holds a single
-DevTools connection, so Joe approves once per session. Chrome asks for
+DevTools connection, so Joe approves once per session. That connection can
+run code in every tab of his browser, so the daemon takes commands only
+over the `\\.\pipe\msf-devtools` named pipe, which web pages can't
+reach. Every request must carry the token in `%LOCALAPPDATA%\Temp\msf\token.txt`,
+and raw DevTools calls are limited to opening and closing tabs. Never give
+it a TCP port: the first version listened on `127.0.0.1:9339` without auth,
+so any web page on the laptop could have driven his Chrome. Run
+`msf stop` when you're done. Chrome asks for
 approval on **every new connection**: a fresh connection per command means
 one prompt per command, and every unanswered prompt hangs that command.
 Tell Joe a prompt is coming before running `msf start`.
