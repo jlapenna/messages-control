@@ -457,8 +457,11 @@
           const v = cached(verdicts, t);
           if (v) badge(t.id, v);
         }
+        // Threads only labelled earlier in this scan still count; skip only
+        // those already acted on.
+        const acted = (t) => /^(deleted|blocked)/.test(rows.get(t.id)?.outcome ?? '');
         const spam = threads.filter((t) => {
-          const v = !rows.has(t.id) && cached(verdicts, t);
+          const v = !acted(t) && cached(verdicts, t);
           return v && v.label === 'spam' && v.score >= settings.threshold;
         });
         let moved = 0;
