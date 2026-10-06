@@ -5,7 +5,8 @@
   "description": "Classifies each new Google Messages thread with llm.jlapenna.net and deletes the ones judged spam.",
   "permissions": [
     "storage",
-    "sidePanel"
+    "sidePanel",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "https://messages.google.com/*",

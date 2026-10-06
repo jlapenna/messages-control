@@ -94,11 +94,24 @@ async function init() {
     try {
       const tab = await messagesTab();
       const res = await chrome.tabs.sendMessage(tab.id, { type: 'diagnose' });
-      $('report').hidden = false;
+      $('reportBox').hidden = false;
       $('report').textContent = JSON.stringify(res.report, null, 2);
     } catch (err) {
       status(err.message);
     }
+  });
+  $('copyReport').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText($('report').textContent);
+      status('Diagnose report copied.');
+    } catch (err) {
+      status(`Copy failed: ${err.message}`);
+    }
+  });
+  $('closeReport').addEventListener('click', () => ($('reportBox').hidden = true));
+  $('reload').addEventListener('click', async () => {
+    status('Reloading…');
+    await chrome.runtime.sendMessage({ type: 'reload' }).catch(() => {});
   });
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.log) renderLog();
@@ -106,5 +119,8 @@ async function init() {
   });
   await Promise.all([renderLog(), renderScan()]);
 }
+
+// Edits are noticed while the panel is open too (dev-reload.js).
+setInterval(() => chrome.runtime.sendMessage({ type: 'devPing' }).catch(() => {}), 2000);
 
 init();

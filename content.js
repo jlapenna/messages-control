@@ -266,6 +266,11 @@
   };
   new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
   setInterval(() => scan(), 30000);
+  // Lets an unpacked install notice edits and reload itself (dev-reload.js).
+  // Stops once the extension reloads and this script is orphaned.
+  const devTimer = setInterval(() => {
+    chrome.runtime.sendMessage({ type: 'devPing' }).catch(() => clearInterval(devTimer));
+  }, 2000);
   // Hidden is when existing picture threads may be opened.
   document.addEventListener('visibilitychange', schedule);
   schedule();

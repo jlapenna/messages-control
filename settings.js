@@ -1,5 +1,6 @@
 export const DEFAULT_PROMPT = `You classify SMS/RCS/MMS text message threads.
 Spam = unsolicited marketing, scams, phishing, fake toll/package/delivery/DMV notices, political fundraising, crypto/job/loan/debt offers, "wrong number" or "hi, is this X?" openers from strangers, gambling, adult content.
+Political campaign texts, donation asks and get-out-the-vote blasts are spam, whatever the party and even if the candidate is real.
 NOT spam = personal messages, 2FA/verification codes, appointment and pharmacy reminders, bank/carrier/utility alerts, real delivery updates without suspicious links, group chats with friends.
 Pictures may be attached: judge what they show. Flyers, ads, promos, prize/crypto/political images, fake invoices and QR codes from an unknown sender are spam. If a picture message arrives without the picture, say so in the reason and stay near 0.5.
 OTP = a genuine one-time passcode, verification or login code from a real service, typically just the code plus a "don't share it" warning. A message that pairs a code with a link, prize, payment, or pressure to act is phishing: high spam_probability, otp false.
@@ -9,6 +10,13 @@ Reply with JSON only: {"spam_probability": 0-1, "otp": true|false, "reason": "sh
 // Defaults that earlier versions saved verbatim from the settings page; a
 // stored copy of one of these means "use the current default".
 const PREVIOUS_DEFAULT_PROMPTS = [
+  `You classify SMS/RCS/MMS text message threads.
+Spam = unsolicited marketing, scams, phishing, fake toll/package/delivery/DMV notices, political fundraising, crypto/job/loan/debt offers, "wrong number" or "hi, is this X?" openers from strangers, gambling, adult content.
+NOT spam = personal messages, 2FA/verification codes, appointment and pharmacy reminders, bank/carrier/utility alerts, real delivery updates without suspicious links, group chats with friends.
+Pictures may be attached: judge what they show. Flyers, ads, promos, prize/crypto/political images, fake invoices and QR codes from an unknown sender are spam. If a picture message arrives without the picture, say so in the reason and stay near 0.5.
+OTP = a genuine one-time passcode, verification or login code from a real service, typically just the code plus a "don't share it" warning. A message that pairs a code with a link, prize, payment, or pressure to act is phishing: high spam_probability, otp false.
+spam_probability is how likely the thread is spam, from 0 (certainly not) to 1 (certainly spam). When unsure, stay below 0.5.
+Reply with JSON only: {"spam_probability": 0-1, "otp": true|false, "reason": "short"}`,
   `You classify SMS/RCS text message threads.
 Spam = unsolicited marketing, scams, phishing, fake toll/package/delivery/DMV notices, political fundraising, crypto/job/loan/debt offers, "wrong number" or "hi, is this X?" openers from strangers, gambling, adult content.
 NOT spam = personal messages, 2FA/verification codes, appointment and pharmacy reminders, bank/carrier/utility alerts, real delivery updates without suspicious links, group chats with friends.

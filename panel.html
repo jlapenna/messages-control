@@ -11,9 +11,13 @@
     <button id="diagnose">Diagnose page</button>
     <button id="options">Settings</button>
     <button id="clear">Clear</button>
+    <button id="reload" title="Reload the extension and the Messages tabs, picking up code changes.">Reload</button>
   </div>
   <div id="status" class="muted"></div>
-  <pre id="report" hidden></pre>
+  <div id="reportBox" hidden>
+    <div class="buttons"><button id="copyReport">Copy</button><button id="closeReport">Close</button></div>
+    <pre id="report"></pre>
+  </div>
   <h2>Last scan <span class="muted" id="scanTime"></span></h2>
   <div id="scanSummary" class="muted"></div>
   <ul class="log" id="scanList"></ul>
