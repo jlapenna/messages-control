@@ -266,8 +266,27 @@
 
 
 
+  // Closes open menus and our own unfinished dialogs the way a person would:
+  // Cancel in a dialog, a click on the overlay backdrop, Escape on the focused
+  // element. A synthetic Escape on document alone doesn't close Material menus.
   function closeMenus() {
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    for (const c of document.querySelectorAll('mat-dialog-container [data-e2e-action-button-cancel]')) realClick(c);
+    for (const b of document.querySelectorAll('.cdk-overlay-backdrop')) realClick(b);
+    const esc = { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true };
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', esc));
+    document.dispatchEvent(new KeyboardEvent('keydown', esc));
+  }
+
+  const anyMenuOrDialog = () =>
+    [...document.querySelectorAll('[role="menu"], .mat-mdc-menu-panel, mat-dialog-container')].some(visible);
+
+  // Gets the page back to no open menu or dialog; true if it got there.
+  async function clearOverlays() {
+    for (let i = 0; i < 3 && anyMenuOrDialog(); i++) {
+      closeMenus();
+      if (await waitFor(() => !anyMenuOrDialog(), 1500)) return true;
+    }
+    return !anyMenuOrDialog();
   }
 
   // Deletes a thread: via the list item's menu, else by opening it and using
@@ -280,12 +299,9 @@
   async function menuAction(id, { attr, text, verb, confirmDialog = null }) {
     const findAnyItem = () =>
       [...document.querySelectorAll(`[${attr}]`)].find(visible) ?? findMenuItem(text);
-    // Never act while another menu is open: its item could be clicked
-    // instead of the target's.
-    if (findAnyItem() || findDeleteItem()) {
-      closeMenus();
-      if (!(await waitFor(() => !findAnyItem() && !findDeleteItem(), 1500))) throw new Error(`Another menu is open; not ${verb}`);
-    }
+    // Never act while another menu or dialog is open: its item could be
+    // clicked instead of the target's. Close leftovers first.
+    if (!(await clearOverlays())) throw new Error(`Another menu or dialog is open and won't close; not ${verb}`);
     const thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} not in list`);
     hover(thread.element);
@@ -307,14 +323,22 @@
     }
     realClick(item);
     if (confirmDialog) {
-      await confirmDialog();
+      try {
+        await confirmDialog();
+      } catch (err) {
+        await clearOverlays(); // e.g. a dialog that showed up after we gave up
+        throw err;
+      }
     } else {
       // Some builds confirm in a dialog; these actions may not. Either the
       // thread leaves the list, or a confirm button shows up first.
       const next = await waitFor(() => (!findThread(id) ? 'gone' : findDialogButton(text)), 5000);
       if (next && next !== 'gone') realClick(next);
     }
-    if (!(await waitFor(() => !findThread(id), 8000))) throw new Error(`Thread still listed after ${verb}`);
+    if (!(await waitFor(() => !findThread(id), 15000))) {
+      await clearOverlays();
+      throw new Error(`Thread still listed after ${verb}`);
+    }
     return 'list-menu';
   }
 
@@ -335,7 +359,7 @@
       confirmDialog: async () => {
         const dialog = await waitFor(
           () => document.querySelector('[data-e2e-block-and-report-spam-dialog]')?.closest('mat-dialog-container, [role="dialog"]'),
-          5000,
+          15000, // has taken over 5 s on the real page
         );
         if (!dialog) throw new Error('Block & report dialog not found');
         const report = dialog.querySelector('input[type="checkbox"]');

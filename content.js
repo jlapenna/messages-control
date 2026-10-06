@@ -449,7 +449,10 @@
       if (trashSpam || (processAll && !settings.dryRun)) {
         verdicts = await loadVerdicts();
         // Spam further down the history isn't rendered until the list loads.
-        if (!processAll) threads = (await loadAllThreads()).threads;
+        if (!processAll) {
+          await publish('Loading the whole conversation list…');
+          threads = (await loadAllThreads()).threads;
+        }
         for (const t of threads) {
           const v = cached(verdicts, t);
           if (v) badge(t.id, v);
@@ -465,7 +468,7 @@
           rows.set(t.id, res.row);
           await log(res.row);
           if (['deleted', 'blocked & reported'].includes(res.row.outcome)) moved++;
-          await publish('Moving spam to trash…');
+          await publish(settings.spamAction === 'block' ? 'Blocking & reporting spam…' : 'Moving spam to trash…');
           if (res.abort) break;
         }
         notes.push(`${settings.spamAction === 'block' ? 'blocked & reported' : 'moved to trash'} ${moved} of ${spam.length} spam threads`);

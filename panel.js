@@ -3,10 +3,19 @@ import { getSettings } from './settings.js';
 const $ = (id) => document.getElementById(id);
 const status = (text) => ($('status').textContent = text);
 
+// Messages works in one tab at a time (others show "Messages is open in
+// another tab"). Ask every Messages tab and use the one whose content script
+// answers with conversations listed, preferring the active one.
 async function messagesTab() {
-  const [tab] = await chrome.tabs.query({ url: 'https://messages.google.com/web/*' });
-  if (!tab) throw new Error('Open messages.google.com/web first.');
-  return tab;
+  const tabs = await chrome.tabs.query({ url: 'https://messages.google.com/web/*' });
+  if (!tabs.length) throw new Error('Open messages.google.com/web first.');
+  const live = [];
+  for (const tab of tabs) {
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'diagnose' }).catch(() => null);
+    if (res?.report?.threadCount) live.push(tab);
+  }
+  if (!live.length) throw new Error('No Messages tab is showing conversations. Reload the Messages tab.');
+  return live.find((t) => t.active) ?? live.sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0))[0];
 }
 
 const el = (tag, className, text) => Object.assign(document.createElement(tag), { className, textContent: text ?? '' });
@@ -87,7 +96,7 @@ async function init() {
           : extra.checkPictures
             ? 'Checking pictures…'
             : extra.trashSpam
-              ? 'Acting on spam…'
+              ? 'Acting on existing spam… (progress under Last scan)'
               : includeSeen
                 ? 'Checking top threads…'
                 : 'Scanning…',
