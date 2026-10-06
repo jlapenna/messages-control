@@ -55,7 +55,11 @@
     await chrome.storage.local.set({ verdicts: Object.fromEntries(entries) });
   }
 
-  const cached = (verdicts, t) => (verdicts[t.id]?.text === t.text ? verdicts[t.id] : null);
+  // Bump when classification changes enough that old verdicts should be redone
+  // (2: spam_probability scoring and picture checks).
+  const VERDICT_VERSION = 2;
+  const cached = (verdicts, t) =>
+    verdicts[t.id]?.text === t.text && verdicts[t.id].version === VERDICT_VERSION ? verdicts[t.id] : null;
 
   function badge(id, v) {
     if (v.label === 'spam') markThread(id, `Spam ${pct(v.score)}`, v.reason);
@@ -89,6 +93,7 @@
       text: thread.text,
       media: payload.media ? (verdict.pictures ? `${verdict.pictures} picture${verdict.pictures === 1 ? "" : "s"} checked` : 'picture not retrieved') : undefined,
       time: Date.now(),
+      version: VERDICT_VERSION,
     };
     await rememberVerdict(thread.id, v);
     badge(thread.id, v);
