@@ -89,15 +89,24 @@ from the extension. Snippets must be a single expression; wrap async work in
 | Timestamp | `mws-relative-timestamp > div[aria-label]`, e.g. "34 min", "9:37 AM", "Saturday", "Sep 29" |
 | ⋮ menu | `button[data-e2e-conversation-list-item-menu]`, aria-label "Options for <name>" |
 | Menu items | Archive, Block & report spam, **Move to trash** (`data-e2e-conversation-delete`), Mute |
+| Move to trash | no confirmation dialog; the row is gone in under a second |
+| Open conversation | `mws-messages-list` (no `[role=main]`) |
+| Message | `mws-message-wrapper[msg-id]`; banners such as "Texting with …" are `mws-tombstone-message-wrapper` |
+| Message text | `mws-text-message-part` (nested `[data-e2e-text-message-content]` repeats it) |
+| Picture | `[data-e2e-message-image] img`, a same-origin `blob:` URL, so a canvas can read it |
 
 Pitfalls already hit:
 - The Google Account button's link contains
   `messages.google.com/web/conversations/<id>` in its query string. Match
   links by same origin plus path, never by `href*=`.
 - "Start chat" is `/web/conversations/new`.
-- Not yet checked on the real page: the open conversation's message and
-  picture selectors (`readThread`), the header-menu delete fallback, and
-  whether "Move to trash" ever shows a confirmation dialog.
+- Verified on the real page 2026-10-06: `deleteThread` through the list
+  menu (a real spam thread was moved to trash with Joe's okay), and
+  `readThread` on a picture thread (full text plus one picture; scored 98%
+  spam; view restored). Not yet seen: the header-menu delete fallback.
+- To test driver code without reloading anything, prepend `messages-dom.js`
+  to a snippet and `msf eval` it in the page. It runs in the main world,
+  separate from the content script's copy.
 
 ## WSL gotchas
 

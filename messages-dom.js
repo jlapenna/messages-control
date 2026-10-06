@@ -262,7 +262,7 @@
   const isMediaSnippet = (text) =>
     !text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text));
 
-  const MESSAGES_SELECTOR = 'mws-messages-list, mws-message-list, [data-e2e-message-list], [role="main"]';
+  const MESSAGES_SELECTOR = 'mws-messages-list, mws-message-list, [data-e2e-message-list]';
 
   // Downscaled JPEG data URL of an image, or null if the canvas is tainted.
   async function imageDataUrl(img, max = 768) {
@@ -292,11 +292,17 @@
       const list = await waitFor(() => document.querySelector(MESSAGES_SELECTOR), 5000);
       if (!list) throw new Error('Message list not found');
       await sleep(1500); // let pictures load
-      const texts = [...list.querySelectorAll('mws-text-message-part, [data-e2e-text-message-content], .text-msg')]
-        .map((el) => el.innerText.trim())
-        .filter(Boolean)
-        .slice(-maxTexts);
-      const imgs = [...list.querySelectorAll('img')]
+      // Real page (2026-10): each message is an mws-message-wrapper; its text
+      // is mws-text-message-part (nested elements repeat it, so read that one
+      // only), pictures are [data-e2e-message-image] img with same-origin blob:
+      // URLs. Banners like "Texting with ..." are tombstone wrappers.
+      const wrappers = [...list.querySelectorAll('mws-message-wrapper')];
+      const parts = wrappers.length
+        ? wrappers.flatMap((w) => [...w.querySelectorAll('mws-text-message-part')])
+        : [...list.querySelectorAll('mws-text-message-part, [data-e2e-text-message-content]')];
+      const texts = [...new Set(parts.map((el) => el.innerText.trim()).filter(Boolean))].slice(-maxTexts);
+      const messageImgs = [...list.querySelectorAll('[data-e2e-message-image] img')];
+      const imgs = (messageImgs.length ? messageImgs : [...list.querySelectorAll('img')])
         .filter((img) => !img.closest('mws-avatar, [class*="avatar"]') && Math.max(img.naturalWidth, img.width) >= 100)
         .slice(-maxImages);
       const images = [];
