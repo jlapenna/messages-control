@@ -184,27 +184,37 @@
 
   const findThread = (id) => listThreads().find((t) => t.id === id) ?? null;
 
-  // The list renders lazily as it scrolls. Scroll it to the end until no more
-  // threads appear, put the scroll position back, and return every thread.
-  async function loadAllThreads({ maxRounds = 80 } = {}) {
+  // The list renders lazily: scrolling to the end loads one more page (about
+  // 25 threads, a second or two later), after which the real page shows a
+  // "Load more conversations" button. Scroll and click it until the list
+  // stops growing, put the scroll position back, and return every thread.
+  const findLoadMore = () =>
+    [...document.querySelectorAll('button.load-more, button')].find(
+      (b) => visible(b) && (b.classList.contains('load-more') || /^load more conversations$/i.test(b.innerText.trim())),
+    );
+
+  async function loadAllThreads({ maxRounds = 120, pageWaitMs = 4000 } = {}) {
     const first = document.querySelector(CONVERSATION_ROW);
     let scroller = first?.parentElement;
     while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
     if (!scroller) return listThreads();
     const top = scroller.scrollTop;
-    let count = -1;
-    let stable = 0;
-    for (let i = 0; i < maxRounds && stable < 3; i++) {
-      scroller.scrollTop = scroller.scrollHeight;
-      await sleep(400);
-      const n = listThreads().length;
-      stable = n === count ? stable + 1 : 0;
-      count = n;
+    try {
+      let count = listThreads().length;
+      for (let i = 0; i < maxRounds; i++) {
+        scroller.scrollTop = scroller.scrollHeight;
+        const more = findLoadMore();
+        if (more) realClick(more);
+        const grew = await waitFor(() => listThreads().length > count, pageWaitMs, 200);
+        if (!grew) break;
+        count = listThreads().length;
+      }
+      return listThreads();
+    } finally {
+      scroller.scrollTop = top;
     }
-    const all = listThreads();
-    scroller.scrollTop = top;
-    return all;
   }
+
 
   function findMenuItem(re) {
     const items = document.querySelectorAll('[role="menuitem"], .mat-mdc-menu-item, .mat-menu-item');

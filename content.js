@@ -248,8 +248,10 @@
 
       let { seen, baselined } = await loadSeen();
       const notes = [];
+      // 2: the first sweep missed the real page's "Load more conversations".
+      const SWEEP_VERSION = 2;
       const { fullSweep } = await chrome.storage.local.get('fullSweep');
-      if ((!baselined || !fullSweep) && !includeSeen) {
+      if ((!baselined || fullSweep !== SWEEP_VERSION) && !includeSeen) {
         // Everything already in the conversation list is history, not new
         // mail, including threads the list hasn't rendered yet: load it all
         // first. Installs baselined before this did it once from the visible
@@ -261,7 +263,7 @@
         );
         const all = await loadAllThreads();
         await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id)));
-        await chrome.storage.local.set({ fullSweep: true });
+        await chrome.storage.local.set({ fullSweep: SWEEP_VERSION });
         await log({ label: 'info', outcome: `loaded the whole list: ${all.length} existing threads will never be auto-deleted` });
         notes.push(`${all.length} existing threads marked as not new`);
         if (!baselined) return publishEarly(`First run: ${all.length} existing threads marked as not new. Only new threads will be checked.`);
