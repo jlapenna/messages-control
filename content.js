@@ -89,6 +89,7 @@
     // otp is only set when the model didn't flag spam (see background.js).
     const v = {
       label: verdict.rawSpam ? 'spam' : verdict.otp ? 'otp' : verdict.notification ? 'notice' : 'ok',
+      byModel: verdict.rawSpam || verdict.notification || verdict.otpByModel,
       score: verdict.score,
       reason: verdict.reason,
       text: thread.text,
@@ -112,9 +113,20 @@
   // Notices and one-time codes stop mattering after a day; with the setting
   // on, they go to trash once 2+ calendar days old (so at least 24 hours).
   const OLD_NOTICE_DAYS = 2;
+  // Trashing removes the whole conversation, not just the latest message. Only
+  // automated senders, whose threads are nothing but notices, are eligible:
+  // short codes (48724) and toll-free numbers (833 ...). A business on a
+  // regular number may have a quote or invoice earlier in the thread.
+  const TOLL_FREE = /^1?(800|833|844|855|866|877|888)\d{7}$/;
+  const isAutomatedSender = (name) => {
+    const digits = (name ?? '').replace(/[\s()+.-]/g, '');
+    return /^\d{4,6}$/.test(digits) || TOLL_FREE.test(digits);
+  };
   function decideExpiring(v, t, settings) {
     const kind = v.label === 'otp' ? 'one-time code' : 'notification';
     if (!settings.trashOldNotices) return { outcome: `kept: ${kind}` };
+    if (!isAutomatedSender(t.name)) return { outcome: `kept: ${kind} (only short-code and toll-free senders are auto-trashed)` };
+    if (!v.byModel) return { outcome: `kept: ${kind} (code pattern only, not confirmed by the model)` };
     if (t.ageDays == null) return { outcome: `kept: ${kind}, age unknown` };
     if (t.ageDays < OLD_NOTICE_DAYS) return { outcome: `kept: ${kind}, under 2 days old` };
     if (settings.dryRun) return { outcome: `not deleted: dry run (${kind}, ${t.ageDays} days old)` };

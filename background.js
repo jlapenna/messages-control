@@ -89,6 +89,9 @@ async function classify(thread) {
     // Spam wins: sender-written text can always look like a code ("verify
     // your account, code 123456: http://..."), so OTP never overrides it.
     otp: !rawSpam && (verdict.otp === true || OTP_RE.test(text)),
+    // The regex is only a labelling backstop; cleanup acts on the model's own
+    // flag, since a person's "gate code is 4821" can match the regex.
+    otpByModel: !rawSpam && verdict.otp === true,
     notification: !rawSpam && verdict.notification === true,
     spam: rawSpam && score >= s.threshold,
     rawSpam,
