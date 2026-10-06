@@ -81,7 +81,17 @@ async function init() {
   const runScan = async (includeSeen, extra = {}) => {
     try {
       const tab = await messagesTab();
-      status(includeSeen ? 'Checking top threads…' : 'Scanning…');
+      status(
+        extra.processAll
+          ? 'Processing all messages… (progress under Last scan)'
+          : extra.checkPictures
+            ? 'Checking pictures…'
+            : extra.trashSpam
+              ? 'Moving spam to trash…'
+              : includeSeen
+                ? 'Checking top threads…'
+                : 'Scanning…',
+      );
       const res = await chrome.tabs.sendMessage(tab.id, { type: 'scanNow', includeSeen, ...extra });
       status(res?.summary ?? 'No response from the Messages tab. Reload it.');
     } catch (err) {

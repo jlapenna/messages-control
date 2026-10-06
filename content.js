@@ -4,7 +4,9 @@
 (() => {
   const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, markThread, diagnose } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
-  const VERDICT_LIMIT = 1000;
+  // Above the size of a long history, so "Process all messages" doesn't evict
+  // the verdicts it just made for the newest threads.
+  const VERDICT_LIMIT = 5000;
   const MAX_ATTEMPTS = 3;
   // Existing threads labelled per scan, after new ones, so labelling a long
   // backlog never delays new mail.
@@ -16,8 +18,10 @@
   const attempts = new Map();
   let scanning = false;
   let rescan = false;
-  // Options of requests that arrived while a scan was running, merged.
+  // Options of requests that arrived while a scan was running, merged, and
+  // the callers waiting for that follow-up scan's result.
   let pendingOpts = {};
+  let pendingWaiters = [];
 
   const pct = (x) => `${Math.round(x * 100)}%`;
 
@@ -54,12 +58,20 @@
     return verdicts;
   }
 
-  async function rememberVerdict(id, verdict) {
-    const verdicts = await loadVerdicts();
-    verdicts[id] = verdict;
-    const entries = Object.entries(verdicts).sort((a, b) => b[1].time - a[1].time).slice(0, VERDICT_LIMIT);
-    await chrome.storage.local.set({ verdicts: Object.fromEntries(entries) });
+  // Writes are read-modify-write of one stored object; parallel classify
+  // workers would overwrite each other, so they go through a queue.
+  let verdictQueue = Promise.resolve();
+  function rememberVerdict(id, verdict) {
+    const run = verdictQueue.then(async () => {
+      const verdicts = await loadVerdicts();
+      verdicts[id] = verdict;
+      const entries = Object.entries(verdicts).sort((a, b) => b[1].time - a[1].time).slice(0, VERDICT_LIMIT);
+      await chrome.storage.local.set({ verdicts: Object.fromEntries(entries) });
+    });
+    verdictQueue = run.catch(() => {});
+    return run;
   }
+
 
   // Bump when classification changes enough that old verdicts should be redone
   // (2: spam_probability scoring and picture checks; 3: notifications;
@@ -105,7 +117,17 @@
     const { verdict } = await send({ type: 'classify', thread: payload });
     // otp is only set when the model didn't flag spam (see background.js).
     const v = {
-      label: verdict.rawSpam ? 'spam' : verdict.otp ? 'otp' : verdict.notification ? 'notice' : 'ok',
+      // The model's own labels beat the OTP regex: "pickup code 4821" in an
+      // order notice is a notice (24 h), not a one-time code (6 h).
+      label: verdict.rawSpam
+        ? 'spam'
+        : verdict.otpByModel
+          ? 'otp'
+          : verdict.notification
+            ? 'notice'
+            : verdict.otp
+              ? 'otp'
+              : 'ok',
       byModel: verdict.rawSpam || verdict.notification || verdict.otpByModel,
       score: verdict.score,
       reason: verdict.reason,
@@ -142,7 +164,9 @@
   // assume the message came at the very end of that day: never archive early.
   function minAgeHours(t, now = Date.now()) {
     if (t.msgTime == null) return null;
-    const end = t.recent ? t.msgTime : t.msgTime + 86400000;
+    // End of that calendar day (not +24 h, which is off on DST-change days).
+    const d = new Date(t.msgTime);
+    const end = t.recent ? t.msgTime : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
     return Math.max(0, (now - end) / 3600000);
   }
   const fmtHours = (h) => (h < 48 ? `${Math.floor(h)} hours old` : `${Math.floor(h / 24)} days old`);
@@ -259,7 +283,8 @@
     if (scanning) {
       rescan = true;
       pendingOpts = { ...pendingOpts, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v)) };
-      return 'A scan is running; this request will run right after it.';
+      // Answer when the follow-up scan that carries these options finishes.
+      return new Promise((resolve) => pendingWaiters.push(resolve));
     }
     // processAll: "Process all messages" — load the whole list, label every
     // thread (pictures excepted, see checkPictures), archive old notices, and
@@ -366,12 +391,15 @@
         // below. Picture threads are left to "Check pictures now".
         const todo = unlabelled.filter((t) => !needsOpen(t));
         let done = 0;
+        const failed = [];
         const worker = async () => {
           for (let t = todo.shift(); t; t = todo.shift()) {
             try {
               await classify(t);
             } catch (err) {
               attempts.set(t.id, (attempts.get(t.id) ?? 0) + 1);
+              failed.push(t);
+              await log(row(t, { label: 'error', outcome: 'classify failed; will retry in a later scan', reason: err.message }));
             }
             done++;
             if (done % 4 === 0) await publish(`Classifying ${done}/${done + todo.length}…`);
@@ -379,7 +407,8 @@
         };
         await Promise.all([worker(), worker(), worker(), worker()]);
         verdicts = await loadVerdicts();
-        notes.push(`classified ${done} threads`);
+        notes.push(`classified ${done - failed.length} threads`);
+        if (failed.length) notes.push(`${failed.length} failed (see the log; retried later)`);
       } else {
         for (const t of batch) {
           const res = await processThread(t, { isNew: false, settings, verdicts });
@@ -428,7 +457,13 @@
         notes.push(`moved ${moved} of ${spam.length} spam threads to trash`);
       }
 
-      const pending = unlabelled.length - batch.length;
+      // In "Process all messages" the whole backlog was just classified; what
+      // remains is picture threads (left to Check pictures now) and failures.
+      const pending = processAll ? 0 : unlabelled.length - batch.length;
+      if (processAll) {
+        const pictures = unlabelled.filter(needsOpen).length;
+        if (pictures) notes.push(`${pictures} picture threads left for Check pictures now`);
+      }
       if (pending) {
         notes.push(`${pending} existing threads still to label`);
         rescan = true;
@@ -444,8 +479,13 @@
       if (rescan) {
         rescan = false;
         const next = pendingOpts;
+        const waiters = pendingWaiters;
         pendingOpts = {};
-        setTimeout(() => scan(next), 500);
+        pendingWaiters = [];
+        setTimeout(async () => {
+          const summary = await scan(next);
+          for (const w of waiters) w(summary);
+        }, 500);
       }
     }
   }
@@ -485,9 +525,14 @@
     if (list === watched && list.isConnected) return;
     observer.disconnect();
     observer.observe(list, { childList: true, subtree: true, characterData: true });
+    // Moving to a new list may have missed a message in between.
+    if (watched) schedule();
     watched = list;
   }
   attachObserver();
+  // If Messages replaces the list element, the old one sends no more events;
+  // notice that quickly rather than at the next backstop scan.
+  setInterval(attachObserver, 5000);
   // Backstop only; the observer is the main trigger.
   setInterval(() => {
     attachObserver();
