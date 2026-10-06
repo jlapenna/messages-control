@@ -81,9 +81,13 @@
   // message: picture threads all say "Picture", so a newer message (by list
   // timestamp, 5 minutes' slack for "34 min" drifting) invalidates it.
   const STALE_SLACK_MS = 5 * 60000;
+  // Version 4 only changed one-time codes (byModel), so spam, notice and ok
+  // verdicts from version 3 still hold; throwing them away cost the history
+  // its labels.
+  const versionOk = (v) => v.version === VERDICT_VERSION || (v.version === 3 && v.label !== 'otp');
   const cached = (verdicts, t) => {
     const v = verdicts[t.id];
-    if (!v || v.text !== t.text || v.version !== VERDICT_VERSION) return null;
+    if (!v || v.text !== t.text || !versionOk(v)) return null;
     if (t.msgTime != null && v.msgTime != null && t.msgTime > v.msgTime + STALE_SLACK_MS) return null;
     return v;
   };
@@ -444,6 +448,12 @@
       if (processAll && settings.dryRun) notes.push('dry run is on, so spam was labelled but not blocked or trashed');
       if (trashSpam || (processAll && !settings.dryRun)) {
         verdicts = await loadVerdicts();
+        // Spam further down the history isn't rendered until the list loads.
+        if (!processAll) threads = (await loadAllThreads()).threads;
+        for (const t of threads) {
+          const v = cached(verdicts, t);
+          if (v) badge(t.id, v);
+        }
         const spam = threads.filter((t) => {
           const v = !rows.has(t.id) && cached(verdicts, t);
           return v && v.label === 'spam' && v.score >= settings.threshold;
