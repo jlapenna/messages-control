@@ -9,6 +9,10 @@
   // Existing threads labelled per scan, after new ones, so labelling a long
   // backlog never delays new mail.
   const LABEL_BATCH = 5;
+  // Existing threads are labelled (and listed in the panel) only this far down
+  // the list. After the full-list sweep the page holds the whole history;
+  // labelling all of it would never settle once it outgrew VERDICT_LIMIT.
+  const LABEL_SCOPE = 50;
   const attempts = new Map();
   let scanning = false;
   let rescan = false;
@@ -169,13 +173,16 @@
   const waitingRow = (t) => row(t, { label: 'pending', outcome: 'picture not checked yet: waits until the Messages tab is in the background' });
 
   // Classifies a thread and acts on it. Returns { row, done } where done
-  // means it needs no retry.
-  async function processThread(t, { isNew, settings, verdicts }) {
+  // means it needs no retry; abort tells a delete loop to stop. explicit: the
+  // user asked for this action from the panel (runs with watching off; dry run
+  // still applies). recheck: ignore a cached verdict for picture threads,
+  // whose list timestamp can't always show that a newer picture arrived.
+  async function processThread(t, { isNew, settings, verdicts, explicit = false, recheck = false }) {
     if (isSkippedContact(t, settings)) {
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
-    let v = cached(verdicts, t);
-    if (!v && needsOpen(t) && !canOpen(isNew)) return { row: waitingRow(t), done: false };
+    let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
+    if (!v && needsOpen(t) && !canOpen(isNew || recheck)) return { row: waitingRow(t), done: false };
     if (!v) {
       try {
         v = await classify(t);
@@ -189,12 +196,24 @@
     }
     const { outcome, del } = decide(v, { isNew, settings, thread: t });
     if (!del) return { row: fromVerdict(t, v, outcome), done: true };
-    // Settings were read when the scan started; the user may have switched on
-    // dry run or off watching since. Check again right before each trash.
+
+    // Right before the trash, check again everything the decision rested on.
+    // Settings were read when the scan started and may have changed since.
     const { settings: now } = await send({ type: 'getSettings' });
-    if (now.dryRun || !now.enabled) {
-      const why = now.dryRun ? 'dry run turned on' : 'watching turned off';
-      return { row: fromVerdict(t, v, `not deleted: ${why}`), done: false, abort: true };
+    if (now.dryRun) return { row: fromVerdict(t, v, 'not deleted: dry run turned on'), done: false, abort: true };
+    if (!now.enabled && !explicit) {
+      return { row: fromVerdict(t, v, 'not deleted: watching turned off'), done: false, abort: true };
+    }
+    if (!decide(v, { isNew, settings: now, thread: t }).del) {
+      return { row: fromVerdict(t, v, `not deleted: settings changed (${decide(v, { isNew, settings: now, thread: t }).outcome})`), done: true };
+    }
+    // The thread itself may have changed: the list snapshot can be minutes
+    // old by now (LLM calls, opened picture threads), and a new message could
+    // be in it, e.g. a fresh login code in an old notice thread.
+    const current = listThreads().find((x) => x.id === t.id);
+    const newer = current && current.msgTime != null && t.msgTime != null && current.msgTime > t.msgTime + STALE_SLACK_MS;
+    if (!current || current.text !== t.text || newer) {
+      return { row: fromVerdict(t, v, 'not deleted: thread changed since it was checked'), done: false };
     }
     try {
       const method = await deleteThread(t.id);
@@ -203,6 +222,7 @@
       return { row: fromVerdict(t, v, `delete failed: ${err.message}`), done: true };
     }
   }
+
 
   // Row for a thread this scan didn't process, from what is already known.
   function knownRow(t, { settings, verdicts }) {
@@ -240,7 +260,8 @@
       if (!threads.length) return saveScan('No conversations found on the page. Click Diagnose page.', []);
 
       let verdicts = await loadVerdicts();
-      const publishEarly = (summary) => saveScan(summary, listThreads().map((t) => knownRow(t, { settings, verdicts })));
+      const publishEarly = (summary) =>
+        saveScan(summary, listThreads().slice(0, LABEL_SCOPE).map((t) => knownRow(t, { settings, verdicts })));
       for (const t of threads) {
         const v = cached(verdicts, t);
         if (v) badge(t.id, v);
@@ -261,10 +282,19 @@
         const maybeNew = new Set(
           baselined ? threads.slice(0, settings.topN).filter((t) => !seen[t.id] && t.recent).map((t) => t.id) : [],
         );
-        const all = await loadAllThreads();
+        const { threads: all, complete } = await loadAllThreads();
+        // The sweep can take a while; anything unseen from today now at the
+        // top may have arrived during it.
+        // (On a first run everything listed is history, so nothing is held back.)
+        if (baselined) for (const t of all.slice(0, settings.topN)) if (!seen[t.id] && t.recent) maybeNew.add(t.id);
         await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id)));
-        await chrome.storage.local.set({ fullSweep: SWEEP_VERSION });
-        await log({ label: 'info', outcome: `loaded the whole list: ${all.length} existing threads will never be auto-deleted` });
+        if (complete) await chrome.storage.local.set({ fullSweep: SWEEP_VERSION });
+        await log({
+          label: 'info',
+          outcome: complete
+            ? `loaded the whole list: ${all.length} existing threads will never be auto-deleted`
+            : `loaded ${all.length} threads, but the list didn't finish loading; will try again`,
+        });
         notes.push(`${all.length} existing threads marked as not new`);
         if (!baselined) return publishEarly(`First run: ${all.length} existing threads marked as not new. Only new threads will be checked.`);
         ({ seen, baselined } = await loadSeen());
@@ -279,8 +309,9 @@
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
       const rows = new Map();
+      const shown = () => threads.slice(0, Math.max(LABEL_SCOPE, settings.topN));
       const publish = (summary) =>
-        saveScan(summary, threads.map((t) => rows.get(t.id) ?? knownRow(t, { settings, verdicts })));
+        saveScan(summary, [...new Set([...shown(), ...threads.filter((t) => rows.has(t.id))])].map((t) => rows.get(t.id) ?? knownRow(t, { settings, verdicts })));
 
       for (const t of fresh) rows.set(t.id, row(t, { label: 'pending', outcome: 'checking…' }));
       await publish('Checking new threads…');
@@ -296,7 +327,7 @@
       // Display-only labels for existing threads; decide() never deletes
       // them because isNew is false.
       verdicts = await loadVerdicts();
-      const unlabelled = threads.filter(
+      const unlabelled = shown().filter(
         (t) =>
           !rows.has(t.id) &&
           !isSkippedContact(t, settings) &&
@@ -340,7 +371,7 @@
         let moved = 0;
         for (const t of spam) {
           // isNew: true makes decide() act on it like a newly arrived thread.
-          const res = await processThread(t, { isNew: true, settings, verdicts });
+          const res = await processThread(t, { isNew: true, settings, verdicts, explicit: true, recheck: true });
           rows.set(t.id, res.row);
           await log(res.row);
           if (res.row.outcome === 'deleted') moved++;

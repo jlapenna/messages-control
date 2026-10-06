@@ -187,7 +187,7 @@
   // The list renders lazily: scrolling to the end loads one more page (about
   // 25 threads, a second or two later), after which the real page shows a
   // "Load more conversations" button. Scroll and click it until the list
-  // stops growing, put the scroll position back, and return every thread.
+  // stops growing, put the scroll position back. Returns { threads, complete }.
   const findLoadMore = () =>
     [...document.querySelectorAll('button.load-more, button')].find(
       (b) => visible(b) && (b.classList.contains('load-more') || /^load more conversations$/i.test(b.innerText.trim())),
@@ -197,7 +197,8 @@
     const first = document.querySelector(CONVERSATION_ROW);
     let scroller = first?.parentElement;
     while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
-    if (!scroller) return listThreads();
+    // complete: the list stopped growing with no "Load more" left to press.
+    if (!scroller) return { threads: listThreads(), complete: !findLoadMore() };
     const top = scroller.scrollTop;
     try {
       let count = listThreads().length;
@@ -209,7 +210,7 @@
         if (!grew) break;
         count = listThreads().length;
       }
-      return listThreads();
+      return { threads: listThreads(), complete: !findLoadMore() };
     } finally {
       scroller.scrollTop = top;
     }
