@@ -77,7 +77,7 @@
     }
 
     const entry = { ...base, spam: verdict.rawSpam, otp: verdict.otp, score: verdict.score, reason: verdict.reason };
-    // OTP wins: a verification code is never deleted, whatever the spam score.
+    // otp is only set when the model didn't flag spam (see background.js).
     const label = verdict.otp ? 'otp' : verdict.rawSpam ? 'spam' : 'kept';
     const remembered = { label, score: verdict.score, reason: verdict.reason, time: Date.now() };
     await rememberVerdict(thread.id, remembered);

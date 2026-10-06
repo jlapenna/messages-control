@@ -14,7 +14,9 @@ async function classify(thread) {
     body: JSON.stringify({
       model: s.model,
       temperature: 0,
-      max_tokens: 200,
+      // The default model reasons before answering; a tight cap can leave no
+      // room for the JSON on harder messages.
+      max_tokens: 2000,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: s.prompt },
@@ -25,13 +27,17 @@ async function classify(thread) {
   });
   if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content ?? '';
+  const choice = data.choices?.[0];
+  const content = choice?.message?.content ?? '';
+  if (!content && choice?.finish_reason === 'length') throw new Error('LLM ran out of tokens before answering');
   const json = content.match(/\{[\s\S]*\}/)?.[0];
   if (!json) throw new Error(`Unparseable LLM reply: ${content.slice(0, 200)}`);
   const verdict = JSON.parse(json);
   const confidence = Number(verdict.confidence ?? 0);
   return {
-    otp: verdict.otp === true || OTP_RE.test(text),
+    // Spam wins: sender-written text can always look like a code ("verify
+    // your account, code 123456: http://..."), so OTP never overrides it.
+    otp: verdict.spam !== true && (verdict.otp === true || OTP_RE.test(text)),
     spam: verdict.spam === true && confidence >= s.threshold,
     rawSpam: verdict.spam === true,
     confidence,
