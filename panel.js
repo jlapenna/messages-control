@@ -116,9 +116,10 @@ async function init() {
   $('trashSpam').addEventListener('click', async () => {
     const { lastScan } = await chrome.storage.local.get('lastScan');
     const n = (lastScan?.threads ?? []).filter((t) => t.label === 'spam' && t.outcome?.startsWith('not deleted')).length;
+    // n only counts what's labelled so far; the run classifies the rest first.
     if (!trashArmed) {
       trashArmed = true;
-      $('trashSpam').textContent = `Confirm: ${n} spam threads`;
+      $('trashSpam').textContent = `Confirm (${n}+ spam)`;
       setTimeout(() => {
         trashArmed = false;
         $('trashSpam').textContent = 'Act on existing spam';
@@ -127,7 +128,9 @@ async function init() {
     }
     trashArmed = false;
     $('trashSpam').textContent = 'Act on existing spam';
-    await runScan(false, { trashSpam: true });
+    // The whole job: load everything, classify what isn't yet (pictures
+    // included), then block or trash all spam.
+    await runScan(false, { processAll: true, checkPictures: true, trashSpam: true });
   });
   $('diagnose').addEventListener('click', async () => {
     try {

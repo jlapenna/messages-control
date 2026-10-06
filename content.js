@@ -396,7 +396,8 @@
       if (processAll) {
         // Classify the whole backlog four at a time. Only the LLM calls run in
         // parallel; archiving and trashing (page actions) happen one by one
-        // below. Picture threads are left to "Check pictures now".
+        // below. Picture threads follow one by one when checkPictures is set,
+        // otherwise they're left to "Check pictures now".
         const todo = unlabelled.filter((t) => !needsOpen(t));
         let done = 0;
         const failed = [];
@@ -414,9 +415,30 @@
           }
         };
         await Promise.all([worker(), worker(), worker(), worker()]);
+        // One more try for calls that failed (gateway blips, timeouts).
+        const retry = failed.splice(0);
+        for (const t of retry) {
+          try {
+            await classify(t);
+          } catch (err) {
+            failed.push(t);
+          }
+        }
+        // Picture threads have to be opened, one at a time (it moves the view).
+        let pictures = 0;
+        if (checkPictures) {
+          for (const t of unlabelled.filter(needsOpen)) {
+            await publish(`Checking pictures ${++pictures}…`);
+            try {
+              await classify(t);
+            } catch (err) {
+              failed.push(t);
+            }
+          }
+        }
         verdicts = await loadVerdicts();
-        notes.push(`classified ${done - failed.length} threads`);
-        if (failed.length) notes.push(`${failed.length} failed (see the log; retried later)`);
+        notes.push(`classified ${done + pictures - failed.length} threads`);
+        if (failed.length) notes.push(`${failed.length} could not be classified (see the log)`);
       } else {
         for (const t of batch) {
           const res = await processThread(t, { isNew: false, settings, verdicts });
@@ -465,13 +487,25 @@
           return v && v.label === 'spam' && v.score >= settings.threshold;
         });
         let moved = 0;
+        const actFailed = [];
         for (const t of spam) {
           // isNew: true makes decide() act on it like a newly arrived thread.
           const res = await processThread(t, { isNew: true, settings, verdicts, explicit: true, recheck: true });
           rows.set(t.id, res.row);
           await log(res.row);
           if (['deleted', 'blocked & reported'].includes(res.row.outcome)) moved++;
+          else if (/failed/.test(res.row.outcome)) actFailed.push(t);
           await publish(settings.spamAction === 'block' ? 'Blocking & reporting spam…' : 'Moving spam to trash…');
+          if (res.abort) break;
+        }
+        // One more try for the ones that failed (slow dialogs, stray menus).
+        for (const t of actFailed) {
+          const current = listThreads().find((x) => x.id === t.id);
+          if (!current) continue;
+          const res = await processThread(current, { isNew: true, settings, verdicts, explicit: true });
+          rows.set(t.id, res.row);
+          await log(res.row);
+          if (['deleted', 'blocked & reported'].includes(res.row.outcome)) moved++;
           if (res.abort) break;
         }
         notes.push(`${settings.spamAction === 'block' ? 'blocked & reported' : 'moved to trash'} ${moved} of ${spam.length} spam threads`);
@@ -480,7 +514,7 @@
       // In "Process all messages" the whole backlog was just classified; what
       // remains is picture threads (left to Check pictures now) and failures.
       const pending = processAll ? 0 : unlabelled.length - batch.length;
-      if (processAll) {
+      if (processAll && !checkPictures) {
         const pictures = unlabelled.filter(needsOpen).length;
         if (pictures) notes.push(`${pictures} picture threads left for Check pictures now`);
       }
