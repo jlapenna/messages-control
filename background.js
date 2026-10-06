@@ -4,11 +4,23 @@ const LOG_LIMIT = 300;
 // Backstop for the model: a code-ish word near a 4-8 digit number.
 const OTP_RE = /\b(code|passcode|otp|one[- ]time|verification|verify|2fa|login|sign[- ]in)\b[\s\S]{0,60}\b\d{4,8}\b|\b\d{4,8}\b[\s\S]{0,60}\b(code|passcode|otp|verification)\b/i;
 
+// One quick retry on network-level failures ("Failed to fetch"), which the
+// gateway occasionally produces; HTTP errors are returned as-is.
+async function fetchWithRetry(url, init) {
+  try {
+    return await fetch(url, init);
+  } catch (err) {
+    if (init.signal?.aborted) throw err;
+    await new Promise((r) => setTimeout(r, 2000));
+    return fetch(url, init);
+  }
+}
+
 async function classify(thread) {
   const s = await getSettings();
   if (!s.apiKey) throw new Error('No API key set (open the extension options).');
   const text = `From: ${thread.name}\n${thread.text}`.slice(0, 4000);
-  const res = await fetch(s.endpoint, {
+  const res = await fetchWithRetry(s.endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey}` },
     body: JSON.stringify({

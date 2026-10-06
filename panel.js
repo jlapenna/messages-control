@@ -9,55 +9,57 @@ async function messagesTab() {
   return tab;
 }
 
+const el = (tag, className, text) => Object.assign(document.createElement(tag), { className, textContent: text ?? '' });
+
+// Log entries written before rows had label/outcome.
+const LEGACY = {
+  'would-delete': ['spam', 'not deleted: dry run'],
+  spam: ['spam', 'not deleted: dry run'],
+  deleted: ['spam', 'deleted'],
+  kept: ['ok', 'kept'],
+  otp: ['otp', 'kept: one-time code'],
+  skipped: ['contact', 'not checked: saved contact'],
+  baseline: ['info', null],
+  error: ['error', null],
+};
+
+function normalize(e) {
+  if (e.label) return e;
+  const [label, outcome] = LEGACY[e.action] ?? ['info', e.action];
+  const score = e.score ?? (e.confidence != null ? (e.spam ? e.confidence : 1 - e.confidence) : undefined);
+  return { ...e, label, score, outcome: outcome ?? e.reason, reason: outcome ? e.reason : undefined };
+}
+
+// One line per thread: verdict and score, what happened, then who/when,
+// the model's reason, and the message preview.
+function renderRow(raw, { loggedAt } = {}) {
+  const e = normalize(raw);
+  const li = document.createElement('li');
+  const head = el('div', 'head');
+  head.append(el('span', `tag ${e.label}`, e.label));
+  if (e.score != null) head.append(el('span', 'score', ` ${Math.round(e.score * 100)}%`));
+  if (e.outcome) head.append(el('span', `outcome ${e.outcome.split(/[ :]/)[0]}`, ` · ${e.outcome}`));
+  li.append(head);
+  const who = [e.name, e.timestamp, loggedAt && `logged ${new Date(loggedAt).toLocaleString()}`, e.method && `via ${e.method}`]
+    .filter(Boolean)
+    .join(' · ');
+  if (who) li.append(el('div', 'muted', who));
+  if (e.reason) li.append(el('div', 'reason', e.reason));
+  if (e.text) li.append(el('div', 'snippet muted', e.text));
+  return li;
+}
+
 async function renderLog() {
   const { log = [] } = await chrome.storage.local.get('log');
-  const ul = $('log');
-  ul.replaceChildren();
-  for (const e of log.slice(0, 100)) {
-    const li = document.createElement('li');
-    const head = document.createElement('div');
-    const tag = document.createElement('span');
-    // Entries from before the rename say "would-delete".
-    const action = e.action === 'would-delete' ? 'spam' : e.action;
-    tag.className = `tag ${action}`;
-    tag.textContent = action;
-    head.append(tag, ` ${e.name ?? ''} `);
-    const when = document.createElement('span');
-    when.className = 'muted';
-    when.textContent = new Date(e.time).toLocaleString();
-    head.append(when);
-    li.append(head);
-    // Older entries stored the verdict's confidence rather than a spam score.
-    const score = e.score ?? (e.confidence != null ? (e.spam ? e.confidence : 1 - e.confidence) : null);
-    const detail = [score != null ? `spam score ${Math.round(score * 100)}%` : '', e.reason, e.method && `via ${e.method}`]
-      .filter(Boolean)
-      .join(' · ');
-    if (detail) li.append(Object.assign(document.createElement('div'), { textContent: detail, className: 'muted' }));
-    if (e.text) li.append(Object.assign(document.createElement('div'), { textContent: e.text }));
-    ul.append(li);
-  }
-  if (!log.length) status('No activity yet.');
+  $('log').replaceChildren(...log.slice(0, 100).map((e) => renderRow(e, { loggedAt: e.time })));
+  if (!log.length) $('log').append(el('li', 'muted', 'No activity yet.'));
 }
 
 async function renderScan() {
   const { lastScan } = await chrome.storage.local.get('lastScan');
   $('scanTime').textContent = lastScan ? new Date(lastScan.time).toLocaleTimeString() : '';
   $('scanSummary').textContent = lastScan?.summary ?? 'No scan yet.';
-  const ul = $('scanList');
-  ul.replaceChildren();
-  for (const t of lastScan?.threads ?? []) {
-    const li = document.createElement('li');
-    const state = Object.assign(document.createElement('span'), {
-      className: `state ${String(t.state).split(' ').at(-1)}`,
-      textContent: t.state,
-    });
-    li.append(state, ` ${t.name}`, Object.assign(document.createElement('span'), {
-        className: 'muted',
-        textContent: [t.timestamp, t.score != null && `spam score ${Math.round(t.score * 100)}%`].filter(Boolean).map((x) => ` · ${x}`).join(''),
-      }));
-    if (t.snippet) li.append(Object.assign(document.createElement('div'), { className: 'snippet muted', textContent: t.snippet }));
-    ul.append(li);
-  }
+  $('scanList').replaceChildren(...(lastScan?.threads ?? []).map((t) => renderRow(t)));
 }
 
 async function init() {
