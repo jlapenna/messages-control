@@ -193,7 +193,10 @@
       (b) => visible(b) && (b.classList.contains('load-more') || /^load more conversations$/i.test(b.innerText.trim())),
     );
 
-  async function loadAllThreads({ maxRounds = 120, pageWaitMs = 4000 } = {}) {
+  // A page usually arrives in about 2 s but has taken 13 s on the real page,
+  // so wait generously, and stop only when no "Load more" button is left (or
+  // a page never arrives).
+  async function loadAllThreads({ maxRounds = 200, pageWaitMs = 20000 } = {}) {
     const first = document.querySelector(CONVERSATION_ROW);
     let scroller = first?.parentElement;
     while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
@@ -202,12 +205,18 @@
     const top = scroller.scrollTop;
     try {
       let count = listThreads().length;
-      for (let i = 0; i < maxRounds; i++) {
+      let misses = 0;
+      for (let i = 0; i < maxRounds && misses < 3; i++) {
         scroller.scrollTop = scroller.scrollHeight;
         const more = findLoadMore();
         if (more) realClick(more);
-        const grew = await waitFor(() => listThreads().length > count, pageWaitMs, 200);
-        if (!grew) break;
+        const grew = await waitFor(() => listThreads().length > count, more ? pageWaitMs : 3000, 200);
+        if (!grew && !findLoadMore()) break;
+        if (!grew) {
+          misses++; // the button is still there but nothing arrived: press again
+          continue;
+        }
+        misses = 0;
         count = listThreads().length;
       }
       return { threads: listThreads(), complete: !findLoadMore() };
