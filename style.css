@@ -2,6 +2,9 @@
 @media (prefers-color-scheme: dark) { :root { --fg: #e6e6e6; --bg: #1f1f1f; --muted: #9a9a9a; --line: #3a3a3a; --red: #f2b8b5; --green: #8fd19e; --amber: #f0c674; } }
 body { font: 13px/1.4 system-ui, sans-serif; color: var(--fg); background: var(--bg); margin: 12px; }
 h1 { font-size: 15px; margin: 0 0 8px; }
+h2 { font-size: 13px; margin: 16px 0 4px; }
+.state { font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.snippet { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 label.row { display: flex; gap: 6px; align-items: center; margin: 4px 0; }
 button { font: inherit; padding: 4px 10px; cursor: pointer; }
 .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }

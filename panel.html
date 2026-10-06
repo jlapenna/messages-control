@@ -7,12 +7,17 @@
   <label class="row"><input type="checkbox" id="dryRun"> Dry run (log only, never delete)</label>
   <div class="buttons">
     <button id="scan">Scan now</button>
+    <button id="checkTop">Check top threads</button>
     <button id="diagnose">Diagnose page</button>
     <button id="options">Settings</button>
     <button id="clear">Clear log</button>
   </div>
   <div id="status" class="muted"></div>
   <pre id="report" hidden></pre>
+  <h2>Last scan <span class="muted" id="scanTime"></span></h2>
+  <div id="scanSummary" class="muted"></div>
+  <ul class="log" id="scanList"></ul>
+  <h2>Activity</h2>
   <ul class="log" id="log"></ul>
   <script type="module" src="panel.js"></script>
 </body>

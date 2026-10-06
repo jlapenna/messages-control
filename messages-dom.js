@@ -5,6 +5,13 @@
 // fallbacks. diagnose() reports what matched so they can be fixed quickly.
 (() => {
   const CONVERSATION_LINK = 'a[href*="/web/conversations/"]';
+  // List timestamps: "Now", "5 min", "2:14 PM" for today; "Mon", "Sep 3",
+  // "9/3/25" for older threads.
+  const RECENT_RE = /^(now|just now|\d+\s*mins?(utes?)?( ago)?|\d{1,2}:\d{2}(\s*[ap]\.?m\.?)?)$/i;
+  const TIMESTAMP_RE = new RegExp(
+    `${RECENT_RE.source}|^(yesterday|mon|tue|wed|thu|fri|sat|sun)$|^[a-z]{3} \\d{1,2}$|^\\d{1,2}/\\d{1,2}(/\\d{2,4})?$`,
+    'i',
+  );
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function waitFor(fn, timeout = 5000, interval = 100) {
@@ -63,10 +70,15 @@
         textOf(item, ['[data-e2e-conversation-name]', '.name', 'h2', 'h3']) ||
         (a.innerText.split('\n')[0] ?? '').trim();
       const snippet = textOf(item, ['mws-conversation-snippet', '[data-e2e-conversation-snippet]', '.snippet-text']);
+      const timestamp =
+        textOf(item, ['mws-relative-timestamp', '[data-e2e-conversation-timestamp]', '.timestamp']) ||
+        (a.innerText.split('\n').map((l) => l.trim()).find((l) => TIMESTAMP_RE.test(l)) ?? '');
       threads.push({
         id,
         name,
         snippet,
+        timestamp,
+        recent: RECENT_RE.test(timestamp),
         text: snippet || a.innerText.trim(),
         unread:
           item.matches('.unread, [data-e2e-is-unread="true"]') ||
@@ -174,7 +186,7 @@
       url: location.href,
       listElement: !!document.querySelector('mws-conversations-list'),
       threadCount: threads.length,
-      sample: threads.slice(0, 5).map(({ id, name, snippet, unread }) => ({ id, name, snippet, unread })),
+      sample: threads.slice(0, 5).map(({ id, name, snippet, timestamp, recent, unread }) => ({ id, name, snippet, timestamp, recent, unread })),
       firstItemButtons: first ? [...first.element.querySelectorAll('button')].map(label) : [],
       firstItemMenuButtonFound: first ? !!listMenuButton(first) : false,
       headerMenuButton: headerMenuButton() ? label(headerMenuButton()) : null,

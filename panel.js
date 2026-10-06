@@ -35,6 +35,24 @@ async function renderLog() {
   if (!log.length) status('No activity yet.');
 }
 
+async function renderScan() {
+  const { lastScan } = await chrome.storage.local.get('lastScan');
+  $('scanTime').textContent = lastScan ? new Date(lastScan.time).toLocaleTimeString() : '';
+  $('scanSummary').textContent = lastScan?.summary ?? 'No scan yet.';
+  const ul = $('scanList');
+  ul.replaceChildren();
+  for (const t of lastScan?.threads ?? []) {
+    const li = document.createElement('li');
+    const state = Object.assign(document.createElement('span'), {
+      className: `state ${String(t.state).split(' ')[0]}`,
+      textContent: t.state,
+    });
+    li.append(state, ` ${t.name}`, Object.assign(document.createElement('span'), { className: 'muted', textContent: t.timestamp ? ` · ${t.timestamp}` : '' }));
+    if (t.snippet) li.append(Object.assign(document.createElement('div'), { className: 'snippet muted', textContent: t.snippet }));
+    ul.append(li);
+  }
+}
+
 async function init() {
   const s = await getSettings();
   $('enabled').checked = s.enabled;
@@ -51,16 +69,18 @@ async function init() {
     await chrome.action.setBadgeText({ text: '' });
     await renderLog();
   });
-  $('scan').addEventListener('click', async () => {
+  const runScan = async (includeSeen) => {
     try {
       const tab = await messagesTab();
-      status('Scanning…');
-      await chrome.tabs.sendMessage(tab.id, { type: 'scanNow' });
-      status('Scan finished.');
+      status(includeSeen ? 'Checking top threads…' : 'Scanning…');
+      const res = await chrome.tabs.sendMessage(tab.id, { type: 'scanNow', includeSeen });
+      status(res?.summary ?? 'No response from the Messages tab. Reload it.');
     } catch (err) {
-      status(err.message);
+      status(`${err.message} (reload the Messages tab if the extension was just reloaded)`);
     }
-  });
+  };
+  $('scan').addEventListener('click', () => runScan(false));
+  $('checkTop').addEventListener('click', () => runScan(true));
   $('diagnose').addEventListener('click', async () => {
     try {
       const tab = await messagesTab();
@@ -73,8 +93,9 @@ async function init() {
   });
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.log) renderLog();
+    if (changes.lastScan) renderScan();
   });
-  await renderLog();
+  await Promise.all([renderLog(), renderScan()]);
 }
 
 init();
