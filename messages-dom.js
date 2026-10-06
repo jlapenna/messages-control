@@ -60,10 +60,15 @@
     }
   }
 
-  function threadId(href) {
-    const m = href.match(/\/web\/conversations\/([^/?#]+)/);
+  // Thread id from a URL path ("/web/conversations/<id>"). Anchored, because
+  // other links embed that path in a query string, e.g. the Google Account
+  // button's sign-out link (".../SignOutOptions?continue=...conversations/<id>").
+  function threadId(path) {
+    const m = path.match(/^\/web\/conversations\/([^/?#]+)/);
     return m && m[1] !== 'new' ? m[1] : null;
   }
+
+  const linkThreadId = (a) => (a.origin === location.origin ? threadId(a.pathname) : null);
 
   function textOf(root, selectors) {
     for (const sel of selectors) {
@@ -96,7 +101,7 @@
     const seen = new Set();
     const threads = [];
     for (const a of document.querySelectorAll(CONVERSATION_LINK)) {
-      const id = threadId(a.getAttribute('href') ?? '');
+      const id = linkThreadId(a);
       if (!id || seen.has(id)) continue;
       seen.add(id);
       const item = a.closest('mws-conversation-list-item') ?? a;
@@ -113,7 +118,9 @@
         snippet,
         timestamp,
         recent: isRecent(timestamp),
-        text: snippet || a.innerText.trim(),
+        // No snippet element means no text (e.g. a reaction or picture), not the
+        // row's whole text, which would include the name and timestamp.
+        text: snippet,
         unread:
           item.matches('.unread, [data-e2e-is-unread="true"]') ||
           !!item.querySelector('.unread, [data-e2e-is-unread="true"]'),
@@ -163,21 +170,29 @@
 
   const isOpen = (id) => threadId(location.pathname) === id;
 
+  // The real menu says "Move to trash" (data-e2e-conversation-delete); older
+  // or other builds may say "Delete".
+  const DELETE_RE = /^(delete|move to trash)$/i;
+  const findDeleteItem = () =>
+    [...document.querySelectorAll('[data-e2e-conversation-delete]')].find(visible) ?? findMenuItem(DELETE_RE);
+
   async function confirmDelete(id, requireOpen) {
-    const item = await waitFor(() => findMenuItem(/^delete$/i), 3000);
+    const item = await waitFor(findDeleteItem, 3000);
     if (!item) return false;
-    // Re-check right before the irreversible click: never delete whatever
-    // conversation happens to be open instead of the target.
+    // Re-check right before the click: never delete whatever conversation
+    // happens to be open instead of the target.
     if (requireOpen && !isOpen(id)) throw new Error(`Thread ${id} is no longer the open conversation`);
     realClick(item);
-    const confirm = await waitFor(() => findDialogButton(/^delete$/i), 3000);
-    if (!confirm) throw new Error('Delete confirmation dialog not found');
-    realClick(confirm);
+    // Some builds confirm in a dialog; moving to trash may not. Either the
+    // thread leaves the list, or a confirm button shows up first.
+    const next = await waitFor(() => (!findThread(id) ? 'gone' : findDialogButton(DELETE_RE)), 5000);
+    if (next && next !== 'gone') realClick(next);
     if (!(await waitFor(() => !findThread(id), 8000))) {
-      throw new Error('Thread still listed after confirming delete');
+      throw new Error('Thread still listed after moving it to trash');
     }
     return true;
   }
+
 
   function closeMenus() {
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -208,7 +223,7 @@
     realClick(headerBtn);
     if (await confirmDelete(id, true)) return 'header-menu';
     closeMenus();
-    throw new Error('"Delete" menu item not found');
+    throw new Error('"Move to trash" menu item not found');
   }
 
   // Adds (or updates) a small badge next to the thread's name in the list.
