@@ -38,6 +38,9 @@ export const DEFAULTS = {
   threshold: 0.8,
   // A thread whose name has no digits or "@" is assumed to be a saved contact.
   skipNamedContacts: true,
+  // Open picture threads so the model can see the pictures. Opening marks the
+  // thread read, which sends an RCS read receipt if those are enabled.
+  openPictureThreads: true,
   // Only threads this close to the top of the list count as newly arrived.
   topN: 20,
   prompt: DEFAULT_PROMPT,

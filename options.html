@@ -9,6 +9,8 @@
   <label class="field">Delete when spam confidence ≥<input type="number" id="threshold" min="0" max="1" step="0.05"></label>
   <label class="field">Treat only the top N threads in the list as candidates<input type="number" id="topN" min="1" max="100"></label>
   <label class="row"><input type="checkbox" id="skipNamedContacts"> Never classify threads whose name has no digits or "@" (saved contacts)</label>
+  <label class="row"><input type="checkbox" id="openPictureThreads"> Open picture threads so the model can see the pictures</label>
+  <p class="muted">Opening a thread marks it read: it loses its unread marker, and for RCS chats the sender gets a read receipt if you have those on (Messages settings → RCS chats → Send read receipts). Plain SMS/MMS sends no receipts. Turned off, picture threads are classified from their preview text only, which usually says just "Picture".</p>
   <label class="field">Classifier prompt<textarea id="prompt"></textarea></label>
   <div class="buttons">
     <button id="save">Save</button>

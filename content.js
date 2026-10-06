@@ -72,12 +72,12 @@
   // Opening a thread moves the user's view, so existing picture threads are
   // only opened while the Messages tab is in the background.
   const canOpen = (isNew) => isNew || document.visibilityState === 'hidden';
-  const needsOpen = (t) => isMediaSnippet(t.text);
+  let openPictures = true; // refreshed from settings at the start of each scan
+  const needsOpen = (t) => openPictures && isMediaSnippet(t.text);
 
   async function classify(thread) {
-    const payload = { name: thread.name, text: thread.text };
+    const payload = { name: thread.name, text: thread.text, media: isMediaSnippet(thread.text) };
     if (needsOpen(thread)) {
-      payload.media = true;
       try {
         Object.assign(payload, await readThread(thread.id));
       } catch (err) {
@@ -91,7 +91,13 @@
       score: verdict.score,
       reason: verdict.reason,
       text: thread.text,
-      media: payload.media ? (verdict.pictures ? `${verdict.pictures} picture${verdict.pictures === 1 ? "" : "s"} checked` : 'picture not retrieved') : undefined,
+      media: payload.media
+        ? verdict.pictures
+          ? `${verdict.pictures} picture${verdict.pictures === 1 ? '' : 's'} checked`
+          : openPictures
+            ? 'picture not retrieved'
+            : 'picture not opened (setting off)'
+        : undefined,
       time: Date.now(),
       version: VERDICT_VERSION,
     };
@@ -176,6 +182,7 @@
     try {
       const { settings } = await send({ type: 'getSettings' });
       if (!settings.enabled && !includeSeen) return 'Watching is off.';
+      openPictures = settings.openPictureThreads;
       const threads = listThreads();
       if (!threads.length) return saveScan('No conversations found on the page. Click Diagnose page.', []);
 

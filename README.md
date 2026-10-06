@@ -14,7 +14,8 @@ ones judged spam are deleted.
 
 Picture messages are opened so the model can see the picture: new threads
 immediately (your view returns to where it was), existing ones only while the
-Messages tab is in the background.
+Messages tab is in the background. Opening marks a thread read, which sends an
+RCS read receipt if those are on; Settings can turn picture opening off.
 
 It starts in **dry run**: spam is badged in the thread list and logged as `spam` in the side panel, not
 deleted. Untick dry run once the log looks right.
