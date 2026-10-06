@@ -16,10 +16,42 @@ async function fetchWithRetry(url, init) {
   }
 }
 
+// Pictures arrive as data URLs, or as plain URLs when the page wouldn't let
+// the content script read the pixels; fetch and downscale those here.
+async function toDataUrl(src) {
+  if (!src || src.startsWith('data:')) return src || null;
+  try {
+    const res = await fetch(src, { credentials: 'include', signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return null;
+    const bitmap = await createImageBitmap(await res.blob());
+    const scale = Math.min(1, 768 / Math.max(bitmap.width, bitmap.height));
+    const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const jpeg = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.8 });
+    const bytes = new Uint8Array(await jpeg.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return `data:image/jpeg;base64,${btoa(binary)}`;
+  } catch (err) {
+    console.warn('picture fetch failed', src, err);
+    return null;
+  }
+}
+
 async function classify(thread) {
   const s = await getSettings();
   if (!s.apiKey) throw new Error('No API key set (open the extension options).');
-  const text = `From: ${thread.name}\n${thread.text}`.slice(0, 4000);
+  const body = thread.texts?.length ? thread.texts.join('\n---\n') : thread.text;
+  const media = thread.media
+    ? thread.images?.length
+      ? `\n[${thread.images.length} picture(s) attached below]`
+      : '\n[picture message; the picture could not be retrieved]'
+    : '';
+  const text = `From: ${thread.name}\n${body}${media}`.slice(0, 4000);
+  const images = await Promise.all((thread.images ?? []).map(toDataUrl));
+  const userContent = images.filter(Boolean).length
+    ? [{ type: 'text', text }, ...images.filter(Boolean).map((url) => ({ type: 'image_url', image_url: { url } }))]
+    : text;
   const res = await fetchWithRetry(s.endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey}` },
@@ -32,7 +64,7 @@ async function classify(thread) {
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: s.prompt },
-        { role: 'user', content: text },
+        { role: 'user', content: userContent },
       ],
     }),
     signal: AbortSignal.timeout(60000),
@@ -45,18 +77,22 @@ async function classify(thread) {
   const json = content.match(/\{[\s\S]*\}/)?.[0];
   if (!json) throw new Error(`Unparseable LLM reply: ${content.slice(0, 200)}`);
   const verdict = JSON.parse(json);
-  const confidence = Number(verdict.confidence ?? 0);
+  // Custom prompts from before spam_probability may still answer with
+  // {spam, confidence}.
+  const score = Math.min(1, Math.max(0, Number(
+    verdict.spam_probability ??
+      (verdict.spam === true ? verdict.confidence ?? 1 : 1 - (verdict.confidence ?? 1)),
+  ) || 0));
+  const rawSpam = score >= 0.5;
   return {
     // Spam wins: sender-written text can always look like a code ("verify
     // your account, code 123456: http://..."), so OTP never overrides it.
-    otp: verdict.spam !== true && (verdict.otp === true || OTP_RE.test(text)),
-    spam: verdict.spam === true && confidence >= s.threshold,
-    rawSpam: verdict.spam === true,
-    confidence,
-    // Probability-like spam score: confidence when the model says spam, its
-    // complement when it says not spam.
-    score: verdict.spam === true ? confidence : 1 - confidence,
+    otp: !rawSpam && (verdict.otp === true || OTP_RE.test(text)),
+    spam: rawSpam && score >= s.threshold,
+    rawSpam,
+    score,
     reason: String(verdict.reason ?? ''),
+    pictures: images.filter(Boolean).length,
   };
 }
 

@@ -9,6 +9,7 @@
   ],
   "host_permissions": [
     "https://messages.google.com/*",
+    "https://*.googleusercontent.com/*",
     "https://llm.jlapenna.net/*"
   ],
   "background": {

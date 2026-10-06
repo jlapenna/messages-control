@@ -12,6 +12,22 @@
     `${RECENT_RE.source}|^(yesterday|mon|tue|wed|thu|fri|sat|sun)$|^[a-z]{3} \\d{1,2}$|^\\d{1,2}/\\d{1,2}(/\\d{2,4})?$`,
     'i',
   );
+  // Today's threads show a clock time, "Now" or "5 min"; older ones a day,
+  // month or date. Unanchored, because the element can hold the label twice
+  // (visible plus screen-reader text).
+  const OLDER_RE = /\b(yesterday|mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}\/\d{1,2}/i;
+  const TODAY_RE = /\bnow\b|\b\d+\s*min|\b\d{1,2}:\d{2}\b/i;
+  const isRecent = (ts) => TODAY_RE.test(ts) && !OLDER_RE.test(ts);
+
+  // "Monday Mon" → "Monday"; "2:14 PM\n2:14 PM" → "2:14 PM".
+  function tidyTimestamp(ts) {
+    const lines = [...new Set(ts.split(/\n/).map((l) => l.trim()).filter(Boolean))];
+    const one = lines.join(' ');
+    const words = one.split(/\s+/);
+    if (words.length === 2 && words[0].toLowerCase().startsWith(words[1].toLowerCase())) return words[0];
+    return one;
+  }
+
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   async function waitFor(fn, timeout = 5000, interval = 100) {
@@ -88,15 +104,15 @@
         textOf(item, NAME_SELECTORS) ||
         (a.innerText.split('\n')[0] ?? '').trim();
       const snippet = textOf(item, SNIPPET_SELECTORS);
-      const timestamp =
+      const timestamp = tidyTimestamp(
         textOf(item, ['mws-relative-timestamp', '[data-e2e-conversation-timestamp]', '.timestamp']) ||
-        fallbackTimestamp(item);
+        fallbackTimestamp(item));
       threads.push({
         id,
         name,
         snippet,
         timestamp,
-        recent: RECENT_RE.test(timestamp),
+        recent: isRecent(timestamp),
         text: snippet || a.innerText.trim(),
         unread:
           item.matches('.unread, [data-e2e-is-unread="true"]') ||
@@ -227,6 +243,59 @@
     return true;
   }
 
+  // Snippets the list shows for picture/media messages.
+  const isMediaSnippet = (text) =>
+    !text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text));
+
+  const MESSAGES_SELECTOR = 'mws-messages-list, mws-message-list, [data-e2e-message-list], [role="main"]';
+
+  // Downscaled JPEG data URL of an image, or null if the canvas is tainted.
+  async function imageDataUrl(img, max = 768) {
+    if (!img.complete) await new Promise((r) => img.addEventListener('load', r, { once: true }));
+    const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    try {
+      return canvas.toDataURL('image/jpeg', 0.8);
+    } catch {
+      return null;
+    }
+  }
+
+  // Opens a thread, reads its latest message texts and pictures, then goes
+  // back to whatever conversation was open before. Pictures come back as
+  // data URLs where the page allows it, otherwise as plain URLs.
+  async function readThread(id, { maxImages = 2, maxTexts = 10 } = {}) {
+    const previous = location.pathname;
+    const thread = findThread(id);
+    if (!thread) throw new Error(`Thread ${id} not in list`);
+    try {
+      realClick(thread.link);
+      if (!(await waitFor(() => isOpen(id), 5000))) throw new Error(`Could not open thread ${id}`);
+      const list = await waitFor(() => document.querySelector(MESSAGES_SELECTOR), 5000);
+      if (!list) throw new Error('Message list not found');
+      await sleep(1500); // let pictures load
+      const texts = [...list.querySelectorAll('mws-text-message-part, [data-e2e-text-message-content], .text-msg')]
+        .map((el) => el.innerText.trim())
+        .filter(Boolean)
+        .slice(-maxTexts);
+      const imgs = [...list.querySelectorAll('img')]
+        .filter((img) => !img.closest('mws-avatar, [class*="avatar"]') && Math.max(img.naturalWidth, img.width) >= 100)
+        .slice(-maxImages);
+      const images = [];
+      for (const img of imgs) images.push((await imageDataUrl(img)) ?? img.currentSrc ?? img.src);
+      return { texts, images };
+    } finally {
+      if (location.pathname !== previous) {
+        const back = threadId(previous) && findThread(threadId(previous));
+        if (back) realClick(back.link);
+        else history.back();
+      }
+    }
+  }
+
   // Read-only report of what the selectors match, for fixing them.
   function diagnose() {
     const threads = listThreads();
@@ -243,5 +312,5 @@
     };
   }
 
-  globalThis.MessagesDom = { listThreads, deleteThread, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose, waitFor, sleep };
 })();

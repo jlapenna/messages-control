@@ -40,7 +40,7 @@ function renderRow(raw, { loggedAt } = {}) {
   if (e.score != null) head.append(el('span', 'score', ` ${Math.round(e.score * 100)}%`));
   if (e.outcome) head.append(el('span', `outcome ${e.outcome.split(/[ :]/)[0]}`, ` · ${e.outcome}`));
   li.append(head);
-  const who = [e.name, e.timestamp, loggedAt && `logged ${new Date(loggedAt).toLocaleString()}`, e.method && `via ${e.method}`]
+  const who = [e.name, e.timestamp, e.media, loggedAt && `logged ${new Date(loggedAt).toLocaleString()}`, e.method && `via ${e.method}`]
     .filter(Boolean)
     .join(' · ');
   if (who) li.append(el('div', 'muted', who));

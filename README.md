@@ -12,6 +12,10 @@ ones judged spam are deleted.
 4. Open messages.google.com/web. The first scan marks existing threads as seen;
    only threads that arrive after that are classified.
 
+Picture messages are opened so the model can see the picture: new threads
+immediately (your view returns to where it was), existing ones only while the
+Messages tab is in the background.
+
 It starts in **dry run**: spam is badged in the thread list and logged as `spam` in the side panel, not
 deleted. Untick dry run once the log looks right.
 

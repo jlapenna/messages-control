@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, deleteThread, markThread, diagnose } = globalThis.MessagesDom;
+  const { listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   const VERDICT_LIMIT = 1000;
   const MAX_ATTEMPTS = 3;
@@ -65,14 +65,29 @@
   const looksLikeNamedContact = (name) => !!name && !/[\d@]/.test(name);
   const isSkippedContact = (t, settings) => settings.skipNamedContacts && looksLikeNamedContact(t.name);
 
+  // Opening a thread moves the user's view, so existing picture threads are
+  // only opened while the Messages tab is in the background.
+  const canOpen = (isNew) => isNew || document.visibilityState === 'hidden';
+  const needsOpen = (t) => isMediaSnippet(t.text);
+
   async function classify(thread) {
-    const { verdict } = await send({ type: 'classify', thread: { name: thread.name, text: thread.text } });
+    const payload = { name: thread.name, text: thread.text };
+    if (needsOpen(thread)) {
+      payload.media = true;
+      try {
+        Object.assign(payload, await readThread(thread.id));
+      } catch (err) {
+        console.warn('[spam-filter] could not read thread', thread.id, err);
+      }
+    }
+    const { verdict } = await send({ type: 'classify', thread: payload });
     // otp is only set when the model didn't flag spam (see background.js).
     const v = {
       label: verdict.otp ? 'otp' : verdict.rawSpam ? 'spam' : 'ok',
       score: verdict.score,
       reason: verdict.reason,
       text: thread.text,
+      media: payload.media ? (verdict.pictures ? `${verdict.pictures} picture${verdict.pictures === 1 ? "" : "s"} checked` : 'picture not retrieved') : undefined,
       time: Date.now(),
     };
     await rememberVerdict(thread.id, v);
@@ -100,7 +115,8 @@
     ...fields,
   });
 
-  const fromVerdict = (t, v, outcome) => row(t, { label: v.label, score: v.score, reason: v.reason, outcome });
+  const fromVerdict = (t, v, outcome) => row(t, { label: v.label, score: v.score, reason: v.reason, media: v.media, outcome });
+  const waitingRow = (t) => row(t, { label: 'pending', outcome: 'picture not checked yet: waits until the Messages tab is in the background' });
 
   // Classifies a thread and acts on it. Returns { row, done } where done
   // means it needs no retry.
@@ -109,6 +125,7 @@
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
     let v = cached(verdicts, t);
+    if (!v && needsOpen(t) && !canOpen(isNew)) return { row: waitingRow(t), done: false };
     if (!v) {
       try {
         v = await classify(t);
@@ -134,7 +151,7 @@
   function knownRow(t, { settings, verdicts }) {
     if (isSkippedContact(t, settings)) return row(t, { label: 'contact', outcome: 'not checked: saved contact' });
     const v = cached(verdicts, t);
-    if (!v) return row(t, { label: 'pending', outcome: 'not classified yet' });
+    if (!v) return needsOpen(t) ? waitingRow(t) : row(t, { label: 'pending', outcome: 'not classified yet' });
     return fromVerdict(t, v, decide(v, { isNew: false, settings }).outcome);
   }
 
@@ -201,6 +218,7 @@
           !rows.has(t.id) &&
           !isSkippedContact(t, settings) &&
           !cached(verdicts, t) &&
+          (!needsOpen(t) || canOpen(false)) &&
           (attempts.get(t.id) ?? 0) < MAX_ATTEMPTS,
       );
       for (const t of unlabelled.slice(0, LABEL_BATCH)) {
@@ -236,6 +254,8 @@
   };
   new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
   setInterval(() => scan(), 30000);
+  // Hidden is when existing picture threads may be opened.
+  document.addEventListener('visibilitychange', schedule);
   schedule();
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
