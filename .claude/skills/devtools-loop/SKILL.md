@@ -90,6 +90,8 @@ from the extension. Snippets must be a single expression; wrap async work in
 | ⋮ menu | `button[data-e2e-conversation-list-item-menu]`, aria-label "Options for <name>" |
 | Menu items | Archive, Block & report spam, **Move to trash** (`data-e2e-conversation-delete`), Mute |
 | Move to trash | no confirmation dialog; the row is gone in under a second |
+| Archive | `data-e2e-conversation-menu-archive`; no dialog |
+| Block & report spam | `data-e2e-conversation-menu-block` → `mat-dialog-container` holding `[data-e2e-block-and-report-spam-dialog]`, a "Report spam" checkbox (on by default), Cancel `[data-e2e-action-button-cancel]` and OK `[data-e2e-action-button-confirm]`; the thread moves to Spam & blocked. Verified 2026-10-06 on a real 95% political-spam thread. |
 | Open conversation | `mws-messages-list` (no `[role=main]`) |
 | Message | `mws-message-wrapper[msg-id]`; banners such as "Texting with …" are `mws-tombstone-message-wrapper` |
 | Message text | `mws-text-message-part` (nested `[data-e2e-text-message-content]` repeats it) |
