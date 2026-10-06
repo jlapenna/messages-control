@@ -89,6 +89,7 @@ async function classify(thread) {
     // Spam wins: sender-written text can always look like a code ("verify
     // your account, code 123456: http://..."), so OTP never overrides it.
     otp: !rawSpam && (verdict.otp === true || OTP_RE.test(text)),
+    notification: !rawSpam && verdict.notification === true,
     spam: rawSpam && score >= s.threshold,
     rawSpam,
     score,

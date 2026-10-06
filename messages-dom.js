@@ -19,6 +19,33 @@
   const TODAY_RE = /\bnow\b|\b\d+\s*min|\b\d{1,2}:\d{2}\b/i;
   const isRecent = (ts) => TODAY_RE.test(ts) && !OLDER_RE.test(ts);
 
+  // Calendar days since the thread's last message, from its list timestamp,
+  // or null if it can't be read. Messages shows a weekday name for yesterday
+  // too ("Monday" on a Tuesday), so weekdays count back from today.
+  const WEEKDAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+  const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  function ageDays(ts, now = new Date()) {
+    if (!ts) return null;
+    if (isRecent(ts)) return 0;
+    if (/\byesterday\b/i.test(ts)) return 1;
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const days = (d) => Math.round((today - d) / 86400000);
+    const wd = ts.toLowerCase().match(/\b(sun|mon|tue|wed|thu|fri|sat)/);
+    const mon = ts.toLowerCase().match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.? (\d{1,2})(?:, (\d{4}))?/);
+    const num = ts.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+    if (mon) {
+      let d = new Date(mon[3] ? Number(mon[3]) : now.getFullYear(), MONTHS.indexOf(mon[1]), Number(mon[2]));
+      if (d > today) d = new Date(d.getFullYear() - 1, d.getMonth(), d.getDate());
+      return days(d);
+    }
+    if (num) {
+      const y = num[3] ? (num[3].length === 2 ? 2000 + Number(num[3]) : Number(num[3])) : now.getFullYear();
+      return days(new Date(y, Number(num[1]) - 1, Number(num[2])));
+    }
+    if (wd) return ((today.getDay() - WEEKDAYS.indexOf(wd[1]) + 7) % 7) || 7;
+    return null;
+  }
+
   // "Monday Mon" → "Monday"; "2:14 PM\n2:14 PM" → "2:14 PM".
   function tidyTimestamp(ts) {
     const lines = [...new Set(ts.split(/\n/).map((l) => l.trim()).filter(Boolean))];
@@ -118,6 +145,7 @@
         snippet,
         timestamp,
         recent: isRecent(timestamp),
+        ageDays: ageDays(timestamp),
         // No snippet element means no text (e.g. a reaction or picture), not the
         // row's whole text, which would include the name and timestamp.
         text: snippet,
@@ -337,5 +365,5 @@
     };
   }
 
-  globalThis.MessagesDom = { listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose, waitFor, sleep };
 })();

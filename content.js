@@ -56,14 +56,15 @@
   }
 
   // Bump when classification changes enough that old verdicts should be redone
-  // (2: spam_probability scoring and picture checks).
-  const VERDICT_VERSION = 2;
+  // (2: spam_probability scoring and picture checks; 3: notifications).
+  const VERDICT_VERSION = 3;
   const cached = (verdicts, t) =>
     verdicts[t.id]?.text === t.text && verdicts[t.id].version === VERDICT_VERSION ? verdicts[t.id] : null;
 
   function badge(id, v) {
     if (v.label === 'spam') markThread(id, `Spam ${pct(v.score)}`, v.reason);
     else if (v.label === 'otp') markThread(id, 'OTP', v.reason, '#0b57d0');
+    else if (v.label === 'notice') markThread(id, 'Notice', v.reason, '#5f6368');
   }
 
   const looksLikeNamedContact = (name) => !!name && !/[\d@]/.test(name);
@@ -87,7 +88,7 @@
     const { verdict } = await send({ type: 'classify', thread: payload });
     // otp is only set when the model didn't flag spam (see background.js).
     const v = {
-      label: verdict.otp ? 'otp' : verdict.rawSpam ? 'spam' : 'ok',
+      label: verdict.rawSpam ? 'spam' : verdict.otp ? 'otp' : verdict.notification ? 'notice' : 'ok',
       score: verdict.score,
       reason: verdict.reason,
       text: thread.text,
@@ -108,14 +109,27 @@
 
   // What should happen to a thread with this verdict, and why. Pure: the
   // caller performs the delete when this says so.
-  function decide(v, { isNew, settings }) {
-    if (v.label === 'otp') return { outcome: 'kept: one-time code' };
+  // Notices and one-time codes stop mattering after a day; with the setting
+  // on, they go to trash once 2+ calendar days old (so at least 24 hours).
+  const OLD_NOTICE_DAYS = 2;
+  function decideExpiring(v, t, settings) {
+    const kind = v.label === 'otp' ? 'one-time code' : 'notification';
+    if (!settings.trashOldNotices) return { outcome: `kept: ${kind}` };
+    if (t.ageDays == null) return { outcome: `kept: ${kind}, age unknown` };
+    if (t.ageDays < OLD_NOTICE_DAYS) return { outcome: `kept: ${kind}, under 2 days old` };
+    if (settings.dryRun) return { outcome: `not deleted: dry run (${kind}, ${t.ageDays} days old)` };
+    return { outcome: `moving to trash (${kind}, ${t.ageDays} days old)`, del: true };
+  }
+
+  function decide(v, { isNew, settings, thread }) {
+    if (v.label === 'otp' || v.label === 'notice') return decideExpiring(v, thread, settings);
     if (v.label === 'ok') return { outcome: 'kept' };
     if (v.score < settings.threshold) return { outcome: `kept: below ${pct(settings.threshold)} threshold` };
     if (!isNew) return { outcome: 'not deleted: existing thread' };
     if (settings.dryRun) return { outcome: 'not deleted: dry run' };
     return { outcome: 'deleting…', del: true };
   }
+
 
   // One row per thread, shared by the activity log and the last-scan list.
   const row = (t, fields) => ({
@@ -148,11 +162,11 @@
         return { row: row(t, { label: 'error', outcome, reason: err.message }), done };
       }
     }
-    const { outcome, del } = decide(v, { isNew, settings });
+    const { outcome, del } = decide(v, { isNew, settings, thread: t });
     if (!del) return { row: fromVerdict(t, v, outcome), done: true };
     try {
       const method = await deleteThread(t.id);
-      return { row: { ...fromVerdict(t, v, 'deleted'), method }, done: true };
+      return { row: { ...fromVerdict(t, v, outcome.startsWith('moving') ? outcome.replace('moving', 'moved') : 'deleted'), method }, done: true };
     } catch (err) {
       return { row: fromVerdict(t, v, `delete failed: ${err.message}`), done: true };
     }
@@ -163,7 +177,7 @@
     if (isSkippedContact(t, settings)) return row(t, { label: 'contact', outcome: 'not checked: saved contact' });
     const v = cached(verdicts, t);
     if (!v) return needsOpen(t) ? waitingRow(t) : row(t, { label: 'pending', outcome: 'not classified yet' });
-    return fromVerdict(t, v, decide(v, { isNew: false, settings }).outcome);
+    return fromVerdict(t, v, decide(v, { isNew: false, settings, thread: t }).outcome);
   }
 
   async function saveScan(summary, rows) {
@@ -238,6 +252,21 @@
         rows.set(t.id, res.row);
         await log(res.row);
         await publish('Labelling existing threads…');
+      }
+
+      // Old notices and codes that were labelled in an earlier scan.
+      if (settings.trashOldNotices && !settings.dryRun) {
+        verdicts = await loadVerdicts();
+        const expired = threads.filter((t) => {
+          const v = !rows.has(t.id) && cached(verdicts, t);
+          return v && decide(v, { isNew: false, settings, thread: t }).del;
+        });
+        for (const t of expired.slice(0, LABEL_BATCH)) {
+          const res = await processThread(t, { isNew: false, settings, verdicts });
+          rows.set(t.id, res.row);
+          await log(res.row);
+          await publish('Moving old notices to trash…');
+        }
       }
 
       const pending = unlabelled.length - Math.min(unlabelled.length, LABEL_BATCH);

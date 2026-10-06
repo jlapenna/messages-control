@@ -2,7 +2,7 @@ import { DEFAULT_PROMPT, getSettings } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (text) => ($('status').textContent = text);
-const FIELDS = ['endpoint', 'model', 'apiKey', 'threshold', 'topN', 'skipNamedContacts', 'openPictureThreads', 'prompt'];
+const FIELDS = ['endpoint', 'model', 'apiKey', 'threshold', 'topN', 'skipNamedContacts', 'openPictureThreads', 'trashOldNotices', 'prompt'];
 
 function read() {
   const out = {};
