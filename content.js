@@ -62,8 +62,9 @@
   }
 
   // Bump when classification changes enough that old verdicts should be redone
-  // (2: spam_probability scoring and picture checks; 3: notifications).
-  const VERDICT_VERSION = 3;
+  // (2: spam_probability scoring and picture checks; 3: notifications;
+  // 4: byModel, so codes can be archived).
+  const VERDICT_VERSION = 4;
   // A verdict is reused only for the same preview text and the same latest
   // message: picture threads all say "Picture", so a newer message (by list
   // timestamp, 5 minutes' slack for "34 min" drifting) invalidates it.
@@ -150,7 +151,10 @@
     const kind = v.label === 'otp' ? 'one-time code' : 'notification';
     const limit = ARCHIVE_AFTER_HOURS[v.label];
     if (!settings.archiveOldNotices) return { outcome: `kept: ${kind}` };
-    if (!v.byModel) return { outcome: `kept: ${kind} (code pattern only, not confirmed by the model)` };
+    // Notices only ever come from the model; a code may come from the regex.
+    if (v.label === 'otp' && v.byModel !== true) {
+      return { outcome: `kept: ${kind} (code pattern only, not confirmed by the model)` };
+    }
     const age = minAgeHours(t);
     if (age == null) return { outcome: `kept: ${kind}, age unknown` };
     if (age < limit) return { outcome: `kept: ${kind}, under ${limit === 24 ? 'a day' : `${limit} hours`} old` };
