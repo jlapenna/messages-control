@@ -56,7 +56,8 @@ Reply with JSON only: {"spam": true|false, "confidence": 0-1, "reason": "short"}
 
 export const DEFAULTS = {
   enabled: true,
-  // Log what would be deleted without deleting. Turn off once the log looks right.
+  // Never move anything to trash; log what would be trashed instead. Turn off
+  // once the log looks right. (Archiving old notices still happens.)
   dryRun: true,
   endpoint: 'https://llm.jlapenna.net/v1/chat/completions',
   model: 'default',
@@ -67,9 +68,10 @@ export const DEFAULTS = {
   // Open picture threads so the model can see the pictures. Opening marks the
   // thread read, which sends an RCS read receipt if those are enabled.
   openPictureThreads: true,
-  // Move notices (order ready, delivered, ...) and one-time codes to trash
-  // once they are 2+ calendar days old. Dry run still applies.
-  trashOldNotices: false,
+  // Archive one-time codes after 6 hours and notices (order ready,
+  // delivered, ...) after a day. Archiving keeps the history, so dry run (which
+  // only forbids trashing) doesn't apply.
+  archiveOldNotices: true,
   // Only threads this close to the top of the list count as newly arrived.
   topN: 20,
   prompt: DEFAULT_PROMPT,

@@ -2,7 +2,7 @@ import { DEFAULTS, DEFAULT_PROMPT, getSettings } from './settings.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (text) => ($('status').textContent = text);
-const FIELDS = ['endpoint', 'model', 'apiKey', 'threshold', 'topN', 'skipNamedContacts', 'openPictureThreads', 'trashOldNotices', 'prompt'];
+const FIELDS = ['endpoint', 'model', 'apiKey', 'threshold', 'topN', 'skipNamedContacts', 'openPictureThreads', 'archiveOldNotices', 'prompt'];
 
 // An empty number field reads as 0, which would make every spam verdict
 // deletable (threshold) or nothing count as new (topN). Clamp to sane ranges

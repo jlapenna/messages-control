@@ -19,8 +19,11 @@ RCS read receipt if those are on; Settings can turn picture opening off.
 
 Automated notice-only texts (order ready, delivered, driver arriving, work
 finished) get a grey "Notice" label; event invites such as Partiful don't.
-Settings can move notices and one-time codes to trash once they are 2+ days
-old (off by default).
+One-time codes are archived after 6 hours and notices after a day (by the
+earliest the latest message could have arrived); archiving keeps the
+conversation and isn't blocked by dry run, which only forbids trashing.
+"Process all messages" in the side panel loads the whole list, labels every
+thread, archives old notices and codes, and trashes spam unless dry run is on.
 
 It starts in **dry run**: spam is badged in the thread list and logged as `spam` in the side panel, not
 deleted. Untick dry run once the log looks right.

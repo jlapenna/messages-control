@@ -253,26 +253,7 @@
   const findDeleteItem = () =>
     [...document.querySelectorAll('[data-e2e-conversation-delete]')].find(visible) ?? findMenuItem(DELETE_RE);
 
-  // Clicks "Move to trash" in the given menu panel (or, if the page didn't
-  // link the button to a panel, the only delete item showing, which the
-  // caller has checked wasn't there before it opened the menu).
-  async function confirmDelete(id, panel) {
-    const inPanel = () =>
-      panel &&
-      ([...panel.querySelectorAll('[data-e2e-conversation-delete]')].find(visible) ??
-        [...panel.querySelectorAll('[role="menuitem"], button')].find((el) => visible(el) && DELETE_RE.test(el.innerText.trim())));
-    const item = await waitFor(() => (panel ? inPanel() : findDeleteItem()), 3000);
-    if (!item) return false;
-    realClick(item);
-    // Some builds confirm in a dialog; moving to trash may not. Either the
-    // thread leaves the list, or a confirm button shows up first.
-    const next = await waitFor(() => (!findThread(id) ? 'gone' : findDialogButton(DELETE_RE)), 5000);
-    if (next && next !== 'gone') realClick(next);
-    if (!(await waitFor(() => !findThread(id), 8000))) {
-      throw new Error('Thread still listed after moving it to trash');
-    }
-    return true;
-  }
+
 
 
 
@@ -285,12 +266,16 @@
   // Moves a thread to trash through its list-item menu (verified on the real
   // page). There is deliberately no fallback that opens the thread: opening
   // marks it read and can send a read receipt to the sender.
-  async function deleteThread(id) {
-    // Never act while another menu is open: its "Move to trash" could be
-    // clicked instead of the target's.
-    if (findDeleteItem()) {
+  // Runs one item of a thread's list-item menu ("Move to trash", "Archive")
+  // and waits for the thread to leave the list.
+  async function menuAction(id, { attr, text, verb }) {
+    const findAnyItem = () =>
+      [...document.querySelectorAll(`[${attr}]`)].find(visible) ?? findMenuItem(text);
+    // Never act while another menu is open: its item could be clicked
+    // instead of the target's.
+    if (findAnyItem() || findDeleteItem()) {
       closeMenus();
-      if (!(await waitFor(() => !findDeleteItem(), 1500))) throw new Error('Another menu is open; not deleting');
+      if (!(await waitFor(() => !findAnyItem() && !findDeleteItem(), 1500))) throw new Error(`Another menu is open; not ${verb}`);
     }
     const thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} not in list`);
@@ -302,10 +287,34 @@
     await waitFor(() => listBtn.getAttribute('aria-expanded') === 'true', 1500);
     const panelId = listBtn.getAttribute('aria-controls');
     const panel = panelId ? document.getElementById(panelId) : null;
-    if (await confirmDelete(id, panel)) return 'list-menu';
-    closeMenus();
-    throw new Error('"Move to trash" menu item not found');
+    const inPanel = () =>
+      panel &&
+      ([...panel.querySelectorAll(`[${attr}]`)].find(visible) ??
+        [...panel.querySelectorAll('[role="menuitem"], button')].find((el) => visible(el) && text.test(el.innerText.trim())));
+    const item = await waitFor(() => (panel ? inPanel() : findAnyItem()), 3000);
+    if (!item) {
+      closeMenus();
+      throw new Error(`"${verb}" menu item not found`);
+    }
+    realClick(item);
+    // Some builds confirm in a dialog; these actions may not. Either the
+    // thread leaves the list, or a confirm button shows up first.
+    const next = await waitFor(() => (!findThread(id) ? 'gone' : findDialogButton(text)), 5000);
+    if (next && next !== 'gone') realClick(next);
+    if (!(await waitFor(() => !findThread(id), 8000))) throw new Error(`Thread still listed after ${verb}`);
+    return 'list-menu';
   }
+
+  // Moves a thread to trash through its list-item menu (verified on the real
+  // page). There is deliberately no fallback that opens the thread: opening
+  // marks it read and can send a read receipt to the sender.
+  const deleteThread = (id) => menuAction(id, { attr: 'data-e2e-conversation-delete', text: DELETE_RE, verb: 'moving to trash' });
+
+  // Archives a thread (keeps its history; Messages brings it back when a new
+  // message arrives).
+  const archiveThread = (id) =>
+    menuAction(id, { attr: 'data-e2e-conversation-menu-archive', text: /^archive$/i, verb: 'archiving' });
+
 
 
 
@@ -419,5 +428,5 @@
     };
   }
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, markThread, diagnose, waitFor, sleep };
 })();

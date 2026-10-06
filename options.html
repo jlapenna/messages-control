@@ -11,8 +11,8 @@
   <label class="row"><input type="checkbox" id="skipNamedContacts"> Never classify threads whose name has no digits or "@" (saved contacts)</label>
   <label class="row"><input type="checkbox" id="openPictureThreads"> Open picture threads so the model can see the pictures</label>
   <p class="muted">Opening a thread marks it read: it loses its unread marker, and for RCS chats the sender gets a read receipt if you have those on (Messages settings → RCS chats → Send read receipts). Plain SMS/MMS sends no receipts. Turned off, picture threads are classified from their preview text only, which usually says just "Picture".</p>
-  <label class="row"><input type="checkbox" id="trashOldNotices"> Move notices (order ready, delivered, driver arriving…) and one-time codes to trash once they are 2+ days old</label>
-  <p class="muted">Only threads from short codes (like 48724) and toll-free numbers are moved, because trash takes the whole conversation and other senders may have something worth keeping earlier in the thread. "2+ days" means two calendar days back, which guarantees at least 24 hours. Dry run still applies, and they can be restored from Messages → Trash.</p>
+  <label class="row"><input type="checkbox" id="archiveOldNotices"> Archive one-time codes after 6 hours and notices (order ready, delivered, driver arriving…) after a day</label>
+  <p class="muted">Archiving keeps the conversation (Messages → Archived) and brings it back when a new message arrives. Ages count from the latest message; for anything before today the list shows only the day, so it counts from the end of that day and never archives early. Applies even in dry run, which only forbids moving to trash.</p>
   <label class="field">Classifier prompt<textarea id="prompt"></textarea></label>
   <div class="buttons">
     <button id="save">Save</button>

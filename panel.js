@@ -91,6 +91,7 @@ async function init() {
   $('scan').addEventListener('click', () => runScan(false));
   $('checkTop').addEventListener('click', () => runScan(true));
   $('checkPictures').addEventListener('click', () => runScan(false, { checkPictures: true }));
+  $('processAll').addEventListener('click', () => runScan(false, { processAll: true }));
   // Two clicks: the first shows how many threads would move.
   let trashArmed = false;
   $('trashSpam').addEventListener('click', async () => {

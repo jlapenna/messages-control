@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, markThread, diagnose } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, markThread, diagnose } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   const VERDICT_LIMIT = 1000;
   const MAX_ATTEMPTS = 3;
@@ -129,25 +129,32 @@
   // caller performs the delete when this says so.
   // Notices and one-time codes stop mattering after a day; with the setting
   // on, they go to trash once 2+ calendar days old (so at least 24 hours).
-  const OLD_NOTICE_DAYS = 2;
-  // Trashing removes the whole conversation, not just the latest message. Only
-  // automated senders, whose threads are nothing but notices, are eligible:
-  // short codes (48724) and toll-free numbers (833 ...). A business on a
-  // regular number may have a quote or invoice earlier in the thread.
-  const TOLL_FREE = /^1?(800|833|844|855|866|877|888)\d{7}$/;
-  const isAutomatedSender = (name) => {
-    const digits = (name ?? '').replace(/[\s()+.-]/g, '');
-    return /^\d{4,6}$/.test(digits) || TOLL_FREE.test(digits);
-  };
+  // Notices stop mattering after a day, one-time codes after a few hours, so
+  // they are archived past these ages. Archiving keeps the history and
+  // Messages brings the thread back on a new message, so any sender qualifies
+  // and dry run (which only forbids trashing) doesn't apply. Only labels the
+  // model gave count: the OTP regex backstop can match a person's "gate code
+  // is 4821".
+  const ARCHIVE_AFTER_HOURS = { otp: 6, notice: 24 };
+  // Minimum possible age in hours of the thread's latest message. Before
+  // today the list shows only a day ("Yesterday", "Monday", "Sep 29"), so
+  // assume the message came at the very end of that day: never archive early.
+  function minAgeHours(t, now = Date.now()) {
+    if (t.msgTime == null) return null;
+    const end = t.recent ? t.msgTime : t.msgTime + 86400000;
+    return Math.max(0, (now - end) / 3600000);
+  }
+  const fmtHours = (h) => (h < 48 ? `${Math.floor(h)} hours old` : `${Math.floor(h / 24)} days old`);
+
   function decideExpiring(v, t, settings) {
     const kind = v.label === 'otp' ? 'one-time code' : 'notification';
-    if (!settings.trashOldNotices) return { outcome: `kept: ${kind}` };
-    if (!isAutomatedSender(t.name)) return { outcome: `kept: ${kind} (only short-code and toll-free senders are auto-trashed)` };
+    const limit = ARCHIVE_AFTER_HOURS[v.label];
+    if (!settings.archiveOldNotices) return { outcome: `kept: ${kind}` };
     if (!v.byModel) return { outcome: `kept: ${kind} (code pattern only, not confirmed by the model)` };
-    if (t.ageDays == null) return { outcome: `kept: ${kind}, age unknown` };
-    if (t.ageDays < OLD_NOTICE_DAYS) return { outcome: `kept: ${kind}, under 2 days old` };
-    if (settings.dryRun) return { outcome: `not deleted: dry run (${kind}, ${t.ageDays} days old)` };
-    return { outcome: `moving to trash (${kind}, ${t.ageDays} days old)`, del: true };
+    const age = minAgeHours(t);
+    if (age == null) return { outcome: `kept: ${kind}, age unknown` };
+    if (age < limit) return { outcome: `kept: ${kind}, under ${limit === 24 ? 'a day' : `${limit} hours`} old` };
+    return { outcome: `archiving (${kind}, at least ${fmtHours(age)})`, archive: true };
   }
 
   function decide(v, { isNew, settings, thread }) {
@@ -194,18 +201,20 @@
         return { row: row(t, { label: 'error', outcome, reason: err.message }), done };
       }
     }
-    const { outcome, del } = decide(v, { isNew, settings, thread: t });
-    if (!del) return { row: fromVerdict(t, v, outcome), done: true };
+    const { outcome, del, archive } = decide(v, { isNew, settings, thread: t });
+    if (!del && !archive) return { row: fromVerdict(t, v, outcome), done: true };
 
     // Right before the trash, check again everything the decision rested on.
     // Settings were read when the scan started and may have changed since.
     const { settings: now } = await send({ type: 'getSettings' });
-    if (now.dryRun) return { row: fromVerdict(t, v, 'not deleted: dry run turned on'), done: false, abort: true };
+    const not = archive ? 'not archived' : 'not deleted';
+    if (del && now.dryRun) return { row: fromVerdict(t, v, 'not deleted: dry run turned on'), done: false, abort: true };
     if (!now.enabled && !explicit) {
-      return { row: fromVerdict(t, v, 'not deleted: watching turned off'), done: false, abort: true };
+      return { row: fromVerdict(t, v, `${not}: watching turned off`), done: false, abort: true };
     }
-    if (!decide(v, { isNew, settings: now, thread: t }).del) {
-      return { row: fromVerdict(t, v, `not deleted: settings changed (${decide(v, { isNew, settings: now, thread: t }).outcome})`), done: true };
+    const again = decide(v, { isNew, settings: now, thread: t });
+    if (!(del ? again.del : again.archive)) {
+      return { row: fromVerdict(t, v, `${not}: settings changed (${again.outcome})`), done: true };
     }
     // The thread itself may have changed: the list snapshot can be minutes
     // old by now (LLM calls, opened picture threads), and a new message could
@@ -213,13 +222,13 @@
     const current = listThreads().find((x) => x.id === t.id);
     const newer = current && current.msgTime != null && t.msgTime != null && current.msgTime > t.msgTime + STALE_SLACK_MS;
     if (!current || current.text !== t.text || newer) {
-      return { row: fromVerdict(t, v, 'not deleted: thread changed since it was checked'), done: false };
+      return { row: fromVerdict(t, v, `${not}: thread changed since it was checked`), done: false };
     }
     try {
-      const method = await deleteThread(t.id);
-      return { row: { ...fromVerdict(t, v, outcome.startsWith('moving') ? outcome.replace('moving', 'moved') : 'deleted'), method }, done: true };
+      const method = archive ? await archiveThread(t.id) : await deleteThread(t.id);
+      return { row: { ...fromVerdict(t, v, archive ? outcome.replace('archiving', 'archived') : 'deleted'), method }, done: true };
     } catch (err) {
-      return { row: fromVerdict(t, v, `delete failed: ${err.message}`), done: true };
+      return { row: fromVerdict(t, v, `${archive ? 'archive' : 'delete'} failed: ${err.message}`), done: true };
     }
   }
 
@@ -248,11 +257,14 @@
       pendingOpts = { ...pendingOpts, ...Object.fromEntries(Object.entries(opts).filter(([, v]) => v)) };
       return 'A scan is running; this request will run right after it.';
     }
-    const { includeSeen = false, checkPictures = false, trashSpam = false } = opts;
+    // processAll: "Process all messages" — load the whole list, label every
+    // thread (pictures excepted, see checkPictures), archive old notices, and
+    // trash spam unless dry run is on.
+    const { includeSeen = false, checkPictures = false, trashSpam = false, processAll = false } = opts;
     scanning = true;
     try {
       const { settings } = await send({ type: 'getSettings' });
-      if (!settings.enabled && !includeSeen && !checkPictures && !trashSpam) return 'Watching is off.';
+      if (!settings.enabled && !includeSeen && !checkPictures && !trashSpam && !processAll) return 'Watching is off.';
       if (trashSpam && settings.dryRun) return 'Dry run is on; turn it off to move spam to trash.';
       forceOpen = checkPictures;
       openPictures = settings.openPictureThreads;
@@ -301,6 +313,11 @@
         threads = listThreads(); // scrolling may have re-rendered rows
       }
 
+      if (processAll) {
+        const { threads: all } = await loadAllThreads();
+        threads = all;
+      }
+
       // New threads arrive at the top. Unseen threads dated before today
       // lazy-loaded after the baseline; they are history, not new mail.
       const top = threads.slice(0, settings.topN);
@@ -309,7 +326,7 @@
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
       const rows = new Map();
-      const shown = () => threads.slice(0, Math.max(LABEL_SCOPE, settings.topN));
+      const shown = () => (processAll ? threads : threads.slice(0, Math.max(LABEL_SCOPE, settings.topN)));
       const publish = (summary) =>
         saveScan(summary, [...new Set([...shown(), ...threads.filter((t) => rows.has(t.id))])].map((t) => rows.get(t.id) ?? knownRow(t, { settings, verdicts })));
 
@@ -339,30 +356,56 @@
       const batch = checkPictures
         ? [...unlabelled.filter(needsOpen), ...unlabelled.filter((t) => !needsOpen(t)).slice(0, LABEL_BATCH)]
         : unlabelled.slice(0, LABEL_BATCH);
-      for (const t of batch) {
-        const res = await processThread(t, { isNew: false, settings, verdicts });
-        rows.set(t.id, res.row);
-        await log(res.row);
-        await publish('Labelling existing threads…');
-      }
-
-      // Old notices and codes that were labelled in an earlier scan.
-      if (settings.enabled && settings.trashOldNotices && !settings.dryRun) {
+      if (processAll) {
+        // Classify the whole backlog four at a time. Only the LLM calls run in
+        // parallel; archiving and trashing (page actions) happen one by one
+        // below. Picture threads are left to "Check pictures now".
+        const todo = unlabelled.filter((t) => !needsOpen(t));
+        let done = 0;
+        const worker = async () => {
+          for (let t = todo.shift(); t; t = todo.shift()) {
+            try {
+              await classify(t);
+            } catch (err) {
+              attempts.set(t.id, (attempts.get(t.id) ?? 0) + 1);
+            }
+            done++;
+            if (done % 4 === 0) await publish(`Classifying ${done}/${done + todo.length}…`);
+          }
+        };
+        await Promise.all([worker(), worker(), worker(), worker()]);
         verdicts = await loadVerdicts();
-        const expired = threads.filter((t) => {
-          const v = !rows.has(t.id) && cached(verdicts, t);
-          return v && decide(v, { isNew: false, settings, thread: t }).del;
-        });
-        for (const t of expired.slice(0, LABEL_BATCH)) {
+        notes.push(`classified ${done} threads`);
+      } else {
+        for (const t of batch) {
           const res = await processThread(t, { isNew: false, settings, verdicts });
           rows.set(t.id, res.row);
           await log(res.row);
-          await publish('Moving old notices to trash…');
-        if (res.abort) break;
+          await publish('Labelling existing threads…');
         }
       }
 
-      if (trashSpam) {
+      // Old notices and codes that were labelled in an earlier scan.
+      if ((settings.enabled || processAll) && settings.archiveOldNotices) {
+        verdicts = await loadVerdicts();
+        const expired = threads.filter((t) => {
+          const v = !rows.has(t.id) && cached(verdicts, t);
+          return v && decide(v, { isNew: false, settings, thread: t }).archive;
+        });
+        let archived = 0;
+        for (const t of processAll ? expired : expired.slice(0, LABEL_BATCH)) {
+          const res = await processThread(t, { isNew: false, settings, verdicts, explicit: processAll });
+          rows.set(t.id, res.row);
+          await log(res.row);
+          if (res.row.outcome?.startsWith('archived')) archived++;
+          await publish('Archiving old notices…');
+          if (res.abort) break;
+        }
+        if (archived) notes.push(`archived ${archived} old notices`);
+      }
+
+      if (processAll && settings.dryRun) notes.push('dry run is on, so spam was labelled but not trashed');
+      if (trashSpam || (processAll && !settings.dryRun)) {
         verdicts = await loadVerdicts();
         const spam = threads.filter((t) => {
           const v = !rows.has(t.id) && cached(verdicts, t);
@@ -376,7 +419,7 @@
           await log(res.row);
           if (res.row.outcome === 'deleted') moved++;
           await publish('Moving spam to trash…');
-        if (res.abort) break;
+          if (res.abort) break;
         }
         notes.push(`moved ${moved} of ${spam.length} spam threads to trash`);
       }
@@ -408,8 +451,44 @@
     clearTimeout(timer);
     timer = setTimeout(() => scan(), 1500);
   };
-  new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
-  setInterval(() => scan(), 30000);
+  // Event-driven: Messages renders new texts (pushed to it by Google) into
+  // the conversation list, so watch just that list. Changes that aren't new
+  // messages are ignored: our own badges, and the timestamps ticking from
+  // "34 min" to "35 min". Until the list exists (page still loading), and if
+  // Messages replaces it, the observer falls back to the body.
+  const IGNORED = '.msf-badge, mws-relative-timestamp';
+  const isOwnOrTick = (node) => {
+    const el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+    return !!el?.closest?.(IGNORED) || !!el?.matches?.(IGNORED);
+  };
+  // Judge a change by where it happened: removed nodes are already detached,
+  // so they can't be traced back to a timestamp. Inside a timestamp or badge:
+  // ignore. Elsewhere: relevant unless it only adds or removes our badges.
+  const isBadge = (n) => n.nodeType === Node.ELEMENT_NODE && n.matches('.msf-badge');
+  const relevant = (records) =>
+    records.some((r) => {
+      if (isOwnOrTick(r.target)) return false;
+      const nodes = [...r.addedNodes, ...r.removedNodes];
+      return !nodes.length || nodes.some((n) => !isBadge(n));
+    });
+  let watched = null;
+  const observer = new MutationObserver((records) => {
+    if (relevant(records)) schedule();
+    attachObserver();
+  });
+  function attachObserver() {
+    const list = document.querySelector('mws-conversations-list') ?? document.body;
+    if (list === watched && list.isConnected) return;
+    observer.disconnect();
+    observer.observe(list, { childList: true, subtree: true, characterData: true });
+    watched = list;
+  }
+  attachObserver();
+  // Backstop only; the observer is the main trigger.
+  setInterval(() => {
+    attachObserver();
+    scan();
+  }, 120000);
   // Lets an unpacked install notice edits and reload itself (dev-reload.js).
   // Stops once the extension reloads and this script is orphaned.
   const devTimer = setInterval(() => {
@@ -423,7 +502,7 @@
     if (msg.type === 'diagnose') {
       sendResponse({ ok: true, report: diagnose() });
     } else if (msg.type === 'scanNow') {
-      scan({ includeSeen: !!msg.includeSeen, checkPictures: !!msg.checkPictures, trashSpam: !!msg.trashSpam }).then(
+      scan({ includeSeen: !!msg.includeSeen, checkPictures: !!msg.checkPictures, trashSpam: !!msg.trashSpam, processAll: !!msg.processAll }).then(
         (summary) => sendResponse({ ok: true, summary }),
       );
       return true;
