@@ -57,6 +57,24 @@
     return '';
   }
 
+  const NAME_SELECTORS = ['[data-e2e-conversation-name]', '.name', 'h2', 'h3'];
+  const SNIPPET_SELECTORS = ['mws-conversation-snippet', '[data-e2e-conversation-snippet]', '.snippet-text'];
+
+  // Last leaf element that looks like a timestamp, outside the name and
+  // snippet. Those are sender-controlled: a spam text reading "Sep 3" must
+  // not pass for the thread's timestamp and dodge classification. Without a
+  // snippet element they can't be told apart, so there is no fallback.
+  function fallbackTimestamp(item) {
+    const senderEls = [...NAME_SELECTORS, ...SNIPPET_SELECTORS]
+      .map((sel) => item.querySelector(sel))
+      .filter(Boolean);
+    if (!item.querySelector(SNIPPET_SELECTORS.join(','))) return '';
+    const leaves = [...item.querySelectorAll('*')].filter(
+      (el) => !el.children.length && !senderEls.some((s) => s.contains(el)),
+    );
+    return leaves.map((el) => el.textContent.trim()).findLast((t) => TIMESTAMP_RE.test(t)) ?? '';
+  }
+
   // Threads in list order (most recent first).
   function listThreads() {
     const seen = new Set();
@@ -67,12 +85,12 @@
       seen.add(id);
       const item = a.closest('mws-conversation-list-item') ?? a;
       const name =
-        textOf(item, ['[data-e2e-conversation-name]', '.name', 'h2', 'h3']) ||
+        textOf(item, NAME_SELECTORS) ||
         (a.innerText.split('\n')[0] ?? '').trim();
-      const snippet = textOf(item, ['mws-conversation-snippet', '[data-e2e-conversation-snippet]', '.snippet-text']);
+      const snippet = textOf(item, SNIPPET_SELECTORS);
       const timestamp =
         textOf(item, ['mws-relative-timestamp', '[data-e2e-conversation-timestamp]', '.timestamp']) ||
-        (a.innerText.split('\n').map((l) => l.trim()).find((l) => TIMESTAMP_RE.test(l)) ?? '');
+        fallbackTimestamp(item);
       threads.push({
         id,
         name,
