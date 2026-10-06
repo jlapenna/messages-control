@@ -1,0 +1,50 @@
+#!/bin/bash
+# Drive the user's own Windows Chrome over DevTools from WSL.
+#   msf start                 start the DevTools daemon (user clicks Allow once)
+#   msf status                is the daemon up?
+#   msf targets               list pages and workers
+#   msf eval <match> <file>   evaluate a snippet in the page/worker whose URL contains <match>
+#   msf panel <file>          evaluate a snippet in the extension's own context
+#                             (opens panel.html in a background tab, then closes it)
+#   msf stop                  stop the daemon
+set -euo pipefail
+here=$(cd "$(dirname "$0")" && pwd)
+win_dir=/mnt/c/Users/jlape/AppData/Local/Temp/msf
+node="/mnt/c/Program Files/nodejs/node.exe"
+ext_id=${MSF_EXTENSION_ID:-dpahiknaedpofldcbjijdbdeeinhahao}
+
+# Shells started outside a WSL login (herdr, tmux) may lack WSL_INTEROP,
+# which makes every Windows binary fail with "Invalid argument".
+if ! "$node" -e 0 2>/dev/null; then
+  for s in /run/WSL/*_interop; do
+    if WSL_INTEROP=$s "$node" -e 0 2>/dev/null; then export WSL_INTEROP=$s; break; fi
+  done
+fi
+"$node" -e 0 || { echo "cannot run Windows node.exe (WSL interop)" >&2; exit 1; }
+
+mkdir -p "$win_dir"
+cp "$here"/daemon.mjs "$here"/call.mjs "$win_dir"/
+win() { (cd "$win_dir" && "$node" "$@" | tr -d '\r'); }
+up() { win call.mjs targets >/dev/null 2>&1; }
+
+case "${1:-}" in
+  start)
+    up && { echo "daemon already running"; exit 0; }
+    (cd "$win_dir" && setsid nohup "$node" daemon.mjs > daemon.log 2>&1 < /dev/null &)
+    echo "waiting for the Allow prompt in Chrome (chrome://inspect/#remote-debugging must be on)..."
+    for _ in $(seq 1 120); do up && { echo "connected"; exit 0; }; sleep 1; done
+    echo "not connected after 2 minutes; see $win_dir/daemon.log" >&2; exit 1 ;;
+  status) up && echo up || { echo down; exit 1; } ;;
+  targets) win call.mjs targets ;;
+  eval) cp "$3" "$win_dir/snippet.js"; win call.mjs eval "$2" snippet.js ;;
+  panel)
+    cp "$2" "$win_dir/snippet.js"
+    tid=$(win call.mjs open "chrome-extension://$ext_id/panel.html")
+    sleep 2
+    win call.mjs eval "$ext_id/panel.html" snippet.js || true
+    win call.mjs close "$tid" >/dev/null 2>&1 || true ;;
+  stop)
+    "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe" -NoProfile -Command \
+      "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -like '*daemon.mjs*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId }" ;;
+  *) sed -n '2,9p' "$0"; exit 1 ;;
+esac

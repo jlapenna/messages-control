@@ -33,3 +33,11 @@ deleted. Untick dry run once the log looks right.
 Selectors in `messages-dom.js` are guesses with fallbacks. Side panel → Diagnose page
 shows what matched: the thread count, sample names and snippets, and whether the
 per-thread menu button was found.
+
+## Testing on the real page
+
+`.claude/skills/devtools-loop` describes the loop an agent uses against the
+real Messages page in your own Chrome: `tools/devtools/msf` talks to Chrome
+over DevTools once remote debugging is allowed at
+`chrome://inspect/#remote-debugging`. Unpacked installs reload themselves a
+few seconds after `./sync.sh` (`dev-reload.js`), Messages tabs included.
