@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Messages Spam Filter",
+  "version": "0.1.0",
+  "description": "Classifies each new Google Messages thread with llm.jlapenna.net and deletes the ones judged spam.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://messages.google.com/*",
+    "https://llm.jlapenna.net/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://messages.google.com/web/*"
+      ],
+      "js": [
+        "messages-dom.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Messages Spam Filter"
+  },
+  "options_page": "options.html"
+}
