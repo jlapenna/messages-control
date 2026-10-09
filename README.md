@@ -1,4 +1,4 @@
-# Messages Spam Filter
+# Messages Control
 
 Chrome extension that watches messages.google.com/web. Each new thread is sent
 to `llm.jlapenna.net` (LiteLLM, model `default`) for classification, and the
@@ -6,7 +6,7 @@ ones judged spam are deleted.
 
 ## Install
 
-1. `./sync.sh` copies the extension to `C:\Users\jlape\Downloads\messages-spam-filter`.
+1. `./sync.sh` copies the extension to `C:\Users\jlape\Downloads\messages-control`.
 2. chrome://extensions → Developer mode → Load unpacked → pick that folder.
 3. Extension → Settings → paste a LiteLLM key (`secrets-get LITELLM_API_KEY`) → Save → Test classifier.
 4. Open messages.google.com/web. The first scan marks existing threads as seen;

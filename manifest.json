@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Messages Spam Filter",
+  "name": "Messages Control",
   "version": "0.1.0",
   "description": "Classifies each new Google Messages thread with llm.jlapenna.net and deletes the ones judged spam.",
   "permissions": [
@@ -30,7 +30,7 @@
     }
   ],
   "action": {
-    "default_title": "Messages Spam Filter"
+    "default_title": "Messages Control"
   },
   "options_page": "options.html",
   "side_panel": {

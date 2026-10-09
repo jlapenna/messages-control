@@ -31,7 +31,7 @@ Messages pairing, nothing that involves his phone.
 ## One-time setup (Joe)
 
 1. Load the extension unpacked (chrome://extensions → Load unpacked) from
-   `C:\Users\jlape\Downloads\messages-spam-filter` (`./sync.sh` fills it).
+   `C:\Users\jlape\Downloads\messages-control` (`./sync.sh` fills it).
 2. Turn on `chrome://inspect/#remote-debugging` → "Allow remote debugging for
    this browser instance". Chrome 154 offers this for the everyday profile
    with no restart. It stays on until he turns it off.

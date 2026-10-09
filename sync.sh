@@ -1,7 +1,7 @@
 #!/bin/sh
 # Copy the extension where Windows Chrome can load it unpacked.
 set -eu
-dest=/mnt/c/Users/jlape/Downloads/messages-spam-filter
+dest=/mnt/c/Users/jlape/Downloads/messages-control
 mkdir -p "$dest"
 cd "$(dirname "$0")"
 cp manifest.json *.js *.html *.css "$dest"/

@@ -31,7 +31,7 @@
     return res;
   }
 
-  const log = (entry) => send({ type: 'log', entry }).catch((e) => console.warn('[spam-filter] log failed', e));
+  const log = (entry) => send({ type: 'log', entry }).catch((e) => console.warn('[messages-control] log failed', e));
 
   async function loadSeen() {
     const { seen = {}, baselined = false } = await chrome.storage.local.get(['seen', 'baselined']);
@@ -115,7 +115,7 @@
       try {
         Object.assign(payload, await readThread(thread.id));
       } catch (err) {
-        console.warn('[spam-filter] could not read thread', thread.id, err);
+        console.warn('[messages-control] could not read thread', thread.id, err);
       }
     }
     const { verdict } = await send({ type: 'classify', thread: payload });
@@ -525,7 +525,7 @@
       const summary = [`${threads.length} threads listed, ${fresh.length} new`, ...notes].join('; ');
       return publish(`${summary}.`);
     } catch (err) {
-      console.warn('[spam-filter] scan failed', err);
+      console.warn('[messages-control] scan failed', err);
       return `Scan failed: ${err.message}`;
     } finally {
       forceOpen = false;
