@@ -6,7 +6,13 @@ description: Develop Messages Control standalone and Chrome extension code, DOM 
 # messages-control-dev
 
 Read [README.md](../../../README.md) for behavior and source ownership. Use a
-dedicated feature worktree from current `origin/main`; install with `npm ci`.
+dedicated feature worktree from current `origin/main`. Run `npm ci` only when
+dependency installation is explicitly authorized or required by an applicable
+workflow. Documentation and syntax-only checks do not require installation.
+Read the shared
+[worktree-hygiene](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/worktree-hygiene/SKILL.md)
+and [land-pr](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/land-pr/SKILL.md)
+workflows before Git mutation and publication.
 
 ## Locate the contract
 
