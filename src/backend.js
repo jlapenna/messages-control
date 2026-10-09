@@ -17,6 +17,17 @@ async function fetchWithRetry(url, init) {
   }
 }
 
+// The page hands over picture URLs; only Google's own picture hosts (what the
+// extension's host_permissions allow) are fetched with the browser's cookies.
+function isPictureHost(src) {
+  try {
+    const { protocol, hostname } = new URL(src);
+    return protocol === 'https:' && (hostname.endsWith('.googleusercontent.com') || hostname === 'messages.google.com');
+  } catch {
+    return false;
+  }
+}
+
 export class Backend {
   constructor({ store, settings, context = null, page = null, onLog = () => {} }) {
     this.store = store;
@@ -72,7 +83,7 @@ export class Backend {
   // CORS outside the page) and downscale them in the page's canvas.
   async toDataUrl(src) {
     if (!src || src.startsWith('data:')) return src || null;
-    if (!this.context || !this.page) return null;
+    if (!this.context || !this.page || !isPictureHost(src)) return null;
     try {
       const res = await this.context.request.get(src, { timeout: 15000 });
       if (!res.ok()) return null;

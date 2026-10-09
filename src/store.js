@@ -44,9 +44,10 @@ export class Store {
   flush() {
     clearTimeout(this.timer);
     this.timer = null;
-    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    // The file holds message text and senders: owner-only.
+    fs.mkdirSync(path.dirname(this.file), { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(this.data));
+    fs.writeFileSync(tmp, JSON.stringify(this.data), { mode: 0o600 });
     fs.renameSync(tmp, this.file);
   }
 }
