@@ -119,3 +119,10 @@ Selectors in `messages-dom.js` are guesses with fallbacks.
 `messages-control diagnose` (or the side panel's Diagnose) shows what
 matched: the thread count, sample names and snippets, and whether the
 per-thread menu button was found. `--headed` shows the page itself.
+
+## Repository and harness maintenance
+
+Start at the [agent guide](AGENTS.md) and
+[messages-control-dev skill](.agents/skills/messages-control-dev/SKILL.md) for source ownership,
+verification and delivery. The skill keeps this repository's operational
+boundaries local and routes general harness upkeep to the shared workflow.
