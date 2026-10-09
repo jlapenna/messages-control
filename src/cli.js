@@ -6,7 +6,7 @@ import { CONFIG_FILE, STATE_DIR, loadSettings } from './config.js';
 import { Store } from './store.js';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
-import { LIST, MESSAGES_URL, pair, pairingState, waitForState } from './pair.js';
+import { LIST, MESSAGES_URL, pair, pairingState, waitForPairing, waitForState } from './pair.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The extension's page-side code, unchanged, behind a chrome.* shim.
@@ -23,7 +23,7 @@ const USAGE = `usage: messages-control [command] [--headed] [--live] [--state-di
   diagnose         print what the page driver can see
   test-classifier  send a sample text to the LLM and print the verdict
 
-  --headed         show the browser window (pairing shows the QR there too)
+  --headed         show the browser window; pairing is then done in it (Google sign-in)
   --live           act on spam; the default is a dry run that only logs it
   --state-dir DIR  browser profile and state (default ${STATE_DIR})
 
@@ -87,6 +87,13 @@ async function main() {
   const injected = () => page.evaluate(() => !!globalThis.__mcInjected).catch(() => false);
   async function inject() {
     await page.waitForSelector(LIST, { timeout: 60000 });
+    // The list element comes before its rows; an empty inbox never gets any.
+    // ("Start chat" links to /conversations/new and is there from the start.)
+    await page
+      .locator('a[href*="/web/conversations/"]:not([href*="/conversations/new"])')
+      .first()
+      .waitFor({ timeout: 15000 })
+      .catch(() => {});
     for (const src of PAGE_SCRIPTS) await page.evaluate(src);
     await dismissPrompts();
   }
@@ -99,11 +106,16 @@ async function main() {
   async function ensurePaired() {
     if ((await waitForState(page)) === 'paired') return;
     console.log('This browser profile is not paired with the phone.');
-    await pair(page, { stateDir });
+    if (flags.headed) await waitForPairing(page);
+    else await pair(page, { stateDir });
     console.log('Paired.');
   }
 
-  await page.goto(MESSAGES_URL, { waitUntil: 'domcontentloaded' });
+  // Messages sometimes replaces the first navigation on the spot (ERR_ABORTED);
+  // waitForState sees where it ended up.
+  await page.goto(MESSAGES_URL, { waitUntil: 'domcontentloaded' }).catch((err) => {
+    if (!/ERR_ABORTED/.test(err.message)) throw err;
+  });
   await ensurePaired();
   if (command === 'pair') return shutdown();
 
