@@ -105,7 +105,8 @@
   // only opened while the Messages tab is in the background.
   // forceOpen: the user pressed "Check pictures now".
   let forceOpen = false;
-  const canOpen = (isNew) => isNew || forceOpen || document.visibilityState === 'hidden';
+  // Standalone (src/cli.js) owns its tab, so there it may open at any time.
+  const canOpen = (isNew) => isNew || forceOpen || document.visibilityState === 'hidden' || !!globalThis.MessagesControlStandalone;
   let openPictures = true; // refreshed from settings at the start of each scan
   const needsOpen = (t) => openPictures && isMediaSnippet(t.text);
 
@@ -592,11 +593,6 @@
     attachObserver();
     scan();
   }, 120000);
-  // Lets an unpacked install notice edits and reload itself (dev-reload.js).
-  // Stops once the extension reloads and this script is orphaned.
-  const devTimer = setInterval(() => {
-    chrome.runtime.sendMessage({ type: 'devPing' }).catch(() => clearInterval(devTimer));
-  }, 2000);
   // Hidden is when existing picture threads may be opened.
   document.addEventListener('visibilitychange', schedule);
   schedule();

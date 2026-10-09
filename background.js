@@ -1,5 +1,4 @@
 import { getSettings } from './settings.js';
-import { checkForChanges, reloadEverything } from './dev-reload.js';
 
 const LOG_LIMIT = 300;
 // Backstop for the model: a code-ish word near a 4-8 digit number.
@@ -141,13 +140,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         case 'log':
           await appendLog(msg.entry);
           return sendResponse({ ok: true });
-        case 'devPing':
-          // Sent every few seconds by open Messages tabs and the side panel;
-          // also keeps this worker alive so it can notice edits.
-          return sendResponse({ ok: true, reloading: await checkForChanges() });
-        case 'reload':
-          sendResponse({ ok: true });
-          return reloadEverything();
         case 'clearLog':
           await clearLog();
           return sendResponse({ ok: true });

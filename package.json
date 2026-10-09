@@ -1,0 +1,32 @@
+{
+  "name": "messages-control",
+  "version": "0.2.0",
+  "description": "Watches Google Messages for Web and sorts spam, codes and notices with an LLM",
+  "main": "background.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node bin/messages-control.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jlapenna/messages-control.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "MIT",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/jlapenna/messages-control/issues"
+  },
+  "homepage": "https://github.com/jlapenna/messages-control#readme",
+  "private": "true",
+  "bin": {
+    "messages-control": "./bin/messages-control.js"
+  },
+  "dependencies": {
+    "jsqr": "^1.4.0",
+    "playwright": "^1.64.0",
+    "pngjs": "^7.0.0",
+    "qrcode": "^1.5.4"
+  }
+}

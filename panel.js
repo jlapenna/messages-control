@@ -151,18 +151,11 @@ async function init() {
     }
   });
   $('closeReport').addEventListener('click', () => ($('reportBox').hidden = true));
-  $('reload').addEventListener('click', async () => {
-    status('Reloading…');
-    await chrome.runtime.sendMessage({ type: 'reload' }).catch(() => {});
-  });
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.log) renderLog();
     if (changes.lastScan) renderScan();
   });
   await Promise.all([renderLog(), renderScan()]);
 }
-
-// Edits are noticed while the panel is open too (dev-reload.js).
-setInterval(() => chrome.runtime.sendMessage({ type: 'devPing' }).catch(() => {}), 2000);
 
 init();
