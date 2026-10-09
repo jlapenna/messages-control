@@ -4,7 +4,10 @@ Read [README.md](README.md) and the
 [messages-control-dev skill](.agents/skills/messages-control-dev/SKILL.md) before source changes.
 The skill maps code ownership, local checks, outcome evidence and operational
 authority. Follow it in a dedicated feature worktree from current `origin/main`.
-Use the shared worktree and PR delivery workflows for Git safety and publication.
+Use the shared
+[worktree-hygiene](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/worktree-hygiene/SKILL.md)
+and [land-pr](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/land-pr/SKILL.md)
+workflows for Git safety and publication.
 
 Keep this file a router. Repair the smallest authoritative source, document or
 skill when guidance is missing; retain current contracts separately from dated
