@@ -22,6 +22,8 @@
     // counts: the regex backstop can match a person's "gate code is 4821".
     { name: 'otp-archive', match: { label: ['otp'], byModel: true }, action: 'archive_after', hours: 6, modes: ['full'] },
     { name: 'notice-archive', match: { label: ['notice'] }, action: 'archive_after', hours: 24, modes: ['full'] },
+    // Receipts, bills, appointments, shipments: kept, and listed in the digest.
+    { name: 'transactional-keep', match: { label: ['transactional'] }, action: 'keep' },
   ];
 
   const pct = (x) => `${Math.round(x * 100)}%`;

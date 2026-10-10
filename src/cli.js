@@ -172,10 +172,12 @@ async function testClassifier(settings) {
   const samples = [
     { name: '+1 (555) 010-0199', text: 'USPS: your package is held at the depot, confirm your address at http://usps-redeliver.example to receive it.' },
     { name: '22822', text: 'Old Navy: 40% off everything this weekend! Shop now: http://oldnavy.example/sale Reply STOP to opt out' },
+    { name: '28777', text: 'Your Amazon order #114-2938471 of $42.10 has shipped and will arrive Thursday, Oct 16. Track: 1Z999AA10123456784' },
   ];
   for (const thread of samples) {
     const v = await backend.classify(thread);
-    console.log(`${v.spam ? 'spam' : v.marketing ? 'marketing' : 'ok'} (${Math.round(v.score * 100)}%) · ${v.reason}`);
+    const kind = v.spam ? 'spam' : v.marketing ? 'marketing' : v.transactional ? 'transactional' : 'ok';
+    console.log(`${kind} (${Math.round(v.score * 100)}%) · ${v.reason}${v.extract ? ` · ${JSON.stringify(v.extract)}` : ''}`);
   }
 }
 

@@ -29,6 +29,14 @@ function isPictureHost(src) {
   }
 }
 
+const EXTRACT_KEYS = ['summary', 'date', 'amount', 'code'];
+function extractOf(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const k of EXTRACT_KEYS) if (raw[k] != null && String(raw[k]).trim()) out[k] = String(raw[k]).trim().slice(0, 120);
+  return Object.keys(out).length ? out : null;
+}
+
 export class Backend {
   constructor({ store, settings, context = null, page = null, onLog = () => {}, onFatal = () => {} }) {
     this.store = store;
@@ -184,6 +192,9 @@ export class Backend {
       otpByModel: !rawSpam && verdict.otp === true,
       marketing: !rawSpam && verdict.marketing === true,
       notification: !rawSpam && verdict.notification === true,
+      transactional: !rawSpam && verdict.transactional === true,
+      // What the message is about, for the digest: only known keys, short.
+      extract: extractOf(verdict.extract),
       spam: rawSpam && score >= s.threshold,
       rawSpam,
       score,

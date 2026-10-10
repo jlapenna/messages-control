@@ -15,8 +15,8 @@ const now = Date.UTC(2026, 9, 10, 12, 0, 0);
 const thread = (hoursAgo, recent = false) => ({ msgTime: now - hoursAgo * 3600000, recent });
 
 test('spam mode has only the spam and marketing rules', () => {
-  assert.deepEqual(policy.rules(spam).map((r) => r.name), ['spam-block', 'marketing-delete']);
-  assert.deepEqual(policy.rules(full).map((r) => r.name), ['spam-block', 'spam-review', 'marketing-delete', 'otp-archive', 'notice-archive']);
+  assert.deepEqual(policy.rules(spam).map((r) => r.name), ['spam-block', 'marketing-delete', 'transactional-keep']);
+  assert.deepEqual(policy.rules(full).map((r) => r.name), ['spam-block', 'spam-review', 'marketing-delete', 'otp-archive', 'notice-archive', 'transactional-keep']);
 });
 
 test('spam-ish under the threshold is held for review in full mode only', () => {
