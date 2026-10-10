@@ -8,7 +8,10 @@ classified by an LLM you point it at (any OpenAI-compatible endpoint), and:
   loan/crypto/job offers, wrong-number openers) is **blocked & reported**
   (reversible from Messages → Spam & blocked), or trashed if you prefer;
 - **marketing** (a real store's sale, coupon, loyalty text) is **deleted**,
-  never reported as spam.
+  never reported as spam;
+- **transactional** texts (receipts, bills, appointments, shipments) are
+  kept and listed in the daily digest with what the model extracted:
+  summary, date, amount, confirmation or tracking number.
 
 Threads from saved contacts are never touched. It starts in **dry run**:
 everything is logged, nothing is acted on, until you pass `--live`.

@@ -29,6 +29,17 @@ test('marketing is not spam: marketing flag set, spam false', async () => {
   assert.equal(v.otp, false);
 });
 
+test('transactional messages carry a trimmed extract', async () => {
+  answerWith({ spam_probability: 0.02, transactional: true, extract: { summary: 'Order 4821 shipped', date: '2026-10-12', amount: '$42.10', code: '1Z999', junk: 'ignored', nothing: '' }, reason: 'shipping' });
+  const v = await new Backend({ settings }).classify({ name: '12345', text: 'Your order shipped' });
+  assert.equal(v.transactional, true);
+  assert.deepEqual(v.extract, { summary: 'Order 4821 shipped', date: '2026-10-12', amount: '$42.10', code: '1Z999' });
+  answerWith({ spam_probability: 0.02, transactional: false, extract: {}, reason: 'chat' });
+  const w = await new Backend({ settings }).classify({ name: 'x', text: 'y' });
+  assert.equal(w.transactional, false);
+  assert.equal(w.extract, null);
+});
+
 test('spam wins over marketing and otp', async () => {
   answerWith({ spam_probability: 0.97, marketing: true, otp: true, reason: 'phishing' });
   const v = await new Backend({ settings }).classify({ name: '+15550100199', text: 'verify your account, code 123456: http://x' });

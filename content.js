@@ -102,6 +102,7 @@
   function badge(id, v) {
     if (v.label === 'spam') markThread(id, `Spam ${pct(v.score)}`, v.reason);
     else if (v.label === 'held') markThread(id, 'Review', v.reason, '#b26a00');
+    else if (v.label === 'transactional') markThread(id, 'Keep', v.extract?.summary ?? v.reason, '#1a7f37');
     else if (v.label === 'marketing') markThread(id, 'Marketing', v.reason, '#7b1fa2');
     else if (v.label === 'otp') markThread(id, 'OTP', v.reason, '#0b57d0');
     else if (v.label === 'notice') markThread(id, 'Notice', v.reason, '#5f6368');
@@ -141,12 +142,15 @@
             ? 'otp'
             : verdict.notification
               ? 'notice'
-              : verdict.otp
-                ? 'otp'
-                : 'ok',
+              : verdict.transactional
+                ? 'transactional'
+                : verdict.otp
+                  ? 'otp'
+                  : 'ok',
       byModel: verdict.rawSpam || verdict.notification || verdict.otpByModel,
       score: verdict.score,
       reason: verdict.reason,
+      extract: verdict.extract ?? undefined,
       text: thread.text,
       msgTime: thread.msgTime,
       media: payload.media

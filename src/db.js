@@ -38,15 +38,22 @@ export class Db {
         text text
       );
     `);
+    // Added later: what a transactional message is about (JSON).
+    try {
+      this.db.exec('alter table verdicts add column extract text');
+    } catch (err) {
+      if (!/duplicate column/i.test(err.message)) throw err;
+    }
     fs.chmodSync(file, 0o600);
     this.insertEvent = this.db.prepare(
       'insert into events (time, label, thread_id, name, outcome, reason, score, rule, method) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
     this.upsertVerdict = this.db.prepare(`
-      insert into verdicts (thread_id, label, score, reason, version, time, msg_time, media, text)
-      values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      insert into verdicts (thread_id, label, score, reason, version, time, msg_time, media, text, extract)
+      values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       on conflict(thread_id) do update set label = excluded.label, score = excluded.score, reason = excluded.reason,
-        version = excluded.version, time = excluded.time, msg_time = excluded.msg_time, media = excluded.media, text = excluded.text
+        version = excluded.version, time = excluded.time, msg_time = excluded.msg_time, media = excluded.media, text = excluded.text,
+        extract = excluded.extract
     `);
   }
 
@@ -71,13 +78,22 @@ export class Db {
     this.db.exec('begin');
     try {
       for (const [id, v] of Object.entries(verdicts)) {
-        this.upsertVerdict.run(id, v.label, v.score ?? null, v.reason ?? null, v.version ?? null, v.time ?? null, v.msgTime ?? null, v.media ?? null, v.text ?? null);
+        this.upsertVerdict.run(id, v.label, v.score ?? null, v.reason ?? null, v.version ?? null, v.time ?? null, v.msgTime ?? null, v.media ?? null, v.text ?? null, v.extract ? JSON.stringify(v.extract) : null);
       }
       this.db.exec('commit');
     } catch (err) {
       this.db.exec('rollback');
       throw err;
     }
+  }
+
+  // Transactional verdicts made since a time, with the sender's name.
+  transactional(since) {
+    return this.db
+      .prepare(`select v.thread_id, v.time, v.extract, v.reason, (select name from events e where e.thread_id = v.thread_id and e.name is not null order by e.id desc limit 1) as name
+                from verdicts v where v.label = 'transactional' and v.time >= ? order by v.time desc`)
+      .all(since)
+      .map((r) => ({ ...r, extract: r.extract ? JSON.parse(r.extract) : null }));
   }
 
   events({ since = 0, limit = 50 } = {}) {

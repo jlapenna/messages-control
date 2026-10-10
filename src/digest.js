@@ -20,6 +20,15 @@ export function digestText(db, { since = Date.now() - 86400000, now = Date.now()
     lines.push(`• ${verb} ${e.name ?? '?'} (${e.label}${e.score != null ? ` ${Math.round(e.score * 100)}%` : ''}): ${(e.reason ?? '').slice(0, 90)}`);
   }
   if (acted.length > maxLines) lines.push(`… and ${acted.length - maxLines} more`);
+  const keep = db.transactional(since);
+  if (keep.length) {
+    lines.push('To keep:');
+    for (const k of keep.slice(0, 15)) {
+      const x = k.extract ?? {};
+      const bits = [x.summary ?? k.reason, x.date, x.amount, x.code ? `#${x.code}` : null].filter(Boolean);
+      lines.push(`• ${k.name ?? '?'}: ${bits.join(' · ').slice(0, 140)}`);
+    }
+  }
   const held = events.filter((e) => /not deleted: dry run/.test(e.outcome ?? ''));
   if (held.length) lines.push(`Dry run held ${held.length} action(s): ${[...new Set(held.map((e) => e.name ?? '?'))].slice(0, 8).join(', ')}`);
   const errors = events.filter((e) => e.label === 'error');
