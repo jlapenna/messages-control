@@ -99,6 +99,16 @@ order; the first whose `match` fits the verdict wins. The defaults are:
 | `otp-archive` | label otp, flagged by the model | archive after 6 h | full |
 | `notice-archive` | label notice | archive after 24 h | full |
 
+In full mode a fifth rule, `spam-review`, holds spam-ish threads under the
+threshold (score ≥ 0.5) for a person: `messages-control review` lists them
+and `messages-control act <id> block|trash|archive|keep [--live]` decides
+one (`keep` is remembered, so no rule fires on it again).
+
+`messages-control undo <event>` reverses a block (Spam & blocked →
+Unblock / Not spam) or an archive (Archived → Unarchive) by its number in
+`log`; the thread is then remembered as kept. A trashed thread cannot be
+undone: Messages for web has no trash view.
+
 `messages-control policy show` prints the rules in force;
 `messages-control policy test` replays every cached verdict through them
 and tallies what each rule would do, touching nothing. A `"policies"` list

@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -101,6 +101,7 @@
 
   function badge(id, v) {
     if (v.label === 'spam') markThread(id, `Spam ${pct(v.score)}`, v.reason);
+    else if (v.label === 'held') markThread(id, 'Review', v.reason, '#b26a00');
     else if (v.label === 'marketing') markThread(id, 'Marketing', v.reason, '#7b1fa2');
     else if (v.label === 'otp') markThread(id, 'OTP', v.reason, '#0b57d0');
     else if (v.label === 'notice') markThread(id, 'Notice', v.reason, '#5f6368');
@@ -586,9 +587,72 @@
   document.addEventListener('visibilitychange', schedule);
   schedule();
 
+  // An explicit action on one thread (the review queue): block, trash,
+  // archive, or keep (remembered as a verdict of "ok" so no rule fires
+  // again). Destructive actions need live: true from the caller.
+  async function act(msg) {
+    const find = () => listThreads().find((x) => x.id === msg.id || x.id.startsWith(msg.id));
+    let t = find();
+    if (!t) {
+      // Older threads aren't rendered until the list is loaded.
+      await loadAllThreads();
+      t = find();
+    }
+    if (!t) return { ok: false, error: `thread ${msg.id} is not in the conversation list` };
+    if (msg.action === 'keep') {
+      await rememberVerdict(t.id, { label: 'ok', byModel: true, score: 0, reason: 'kept by you', text: t.text, msgTime: t.msgTime, time: Date.now(), version: VERDICT_VERSION });
+      await markSeen([t.id]);
+      const r = row(t, { label: 'ok', outcome: 'kept by you', rule: 'review' });
+      await log(r);
+      return { ok: true, row: r };
+    }
+    if (!msg.live) return { ok: false, error: `${msg.action} needs --live` };
+    const fn = { block: blockThread, trash: deleteThread, archive: archiveThread }[msg.action];
+    if (!fn) return { ok: false, error: `unknown action ${msg.action}` };
+    try {
+      const method = await fn(t.id);
+      const outcome = { block: 'blocked & reported', trash: 'deleted', archive: 'archived (by you)' }[msg.action];
+      const r = { ...row(t, { label: 'review', outcome, rule: 'review' }), method };
+      await log(r);
+      await markSeen([t.id]);
+      return { ok: true, row: r };
+    } catch (err) {
+      const r = row(t, { label: 'error', outcome: `${msg.action} failed: ${err.message}`, rule: 'review' });
+      await log(r);
+      return { ok: false, error: err.message };
+    }
+  }
+
+  // Undo a block or an archive by the sender's name (from the event being
+  // undone). The thread is then remembered as "ok" so no rule acts on it
+  // again; the person can re-decide with `act`.
+  async function undo(msg) {
+    const fn = { blocked: unblockThread, archived: unarchiveThread }[msg.kind];
+    if (!fn) return { ok: false, error: `cannot undo "${msg.kind}"` };
+    try {
+      const clicked = await fn(msg.name);
+      if (msg.threadId) {
+        await rememberVerdict(msg.threadId, { label: 'ok', byModel: true, score: 0, reason: `undone by you (${clicked})`, text: '', msgTime: null, time: Date.now(), version: VERDICT_VERSION });
+      }
+      const r = { threadId: msg.threadId, name: msg.name, label: 'undo', outcome: clicked === 'Unarchive' ? 'unarchived' : clicked === 'Not spam' ? 'marked not spam' : 'unblocked', rule: 'undo' };
+      await log(r);
+      return { ok: true, row: r };
+    } catch (err) {
+      const r = { threadId: msg.threadId, name: msg.name, label: 'error', outcome: `undo failed: ${err.message}`, rule: 'undo' };
+      await log(r);
+      return { ok: false, error: err.message };
+    }
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg.type === 'diagnose') {
+    if (msg.type === 'undo') {
+      undo(msg).then(sendResponse);
+      return true;
+    } else if (msg.type === 'diagnose') {
       sendResponse({ ok: true, report: diagnose() });
+    } else if (msg.type === 'act') {
+      act(msg).then(sendResponse);
+      return true;
     } else if (msg.type === 'scanNow') {
       scan({ includeSeen: !!msg.includeSeen, checkPictures: !!msg.checkPictures, trashSpam: !!msg.trashSpam, processAll: !!msg.processAll }).then(
         (summary) => sendResponse({ ok: true, summary }),

@@ -5,12 +5,15 @@
 // A policy is { name, match, action, ... }. Rules are tried in order; the
 // first whose match fits the verdict decides. match: { label: [...],
 // minScore (a number, or "threshold" for settings.threshold), byModel }.
-// action: "block_report" | "trash" | "archive_after" (+ hours) | "keep".
+// action: "block_report" | "trash" | "archive_after" (+ hours) | "keep" |
+// "hold" (label it for review; `messages-control review` lists them).
 // modes: which settings.mode values enable the rule (default: all).
 (() => {
   const DEFAULT_POLICIES = [
     // Spam goes by settings.spamAction unless a config rule says otherwise.
     { name: 'spam-block', match: { label: ['spam'], minScore: 'threshold' }, action: 'spamAction', modes: ['spam', 'full'] },
+    // Spam-ish but under the threshold: hold it for a person to look at.
+    { name: 'spam-review', match: { label: ['spam'], minScore: 0.5 }, action: 'hold', modes: ['full'] },
     // Marketing is not spam: deleted, never reported.
     { name: 'marketing-delete', match: { label: ['marketing'] }, action: 'trash', modes: ['spam', 'full'] },
     // One-time codes stop mattering after a few hours, notices after a day.
@@ -76,6 +79,7 @@
       const action = actionOf(rule, settings);
       const base = { rule: rule.name, action };
       if (action === 'keep') return { ...base, outcome: 'kept' };
+      if (action === 'hold') return { ...base, outcome: 'held for review', hold: true };
       if (action === 'archive_after') {
         const kind = KIND[v.label] ?? v.label;
         const age = minAgeHours(thread, now);
