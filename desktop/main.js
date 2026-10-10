@@ -26,6 +26,14 @@ function config() {
 }
 const apiPort = () => config().api?.port ?? 7373;
 const apiUrl = () => `http://127.0.0.1:${apiPort()}/`;
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const sameOrigin = (url) => {
+  try {
+    return new URL(url).origin === new URL(apiUrl()).origin;
+  } catch {
+    return false;
+  }
+};
 
 function run(args, { onExit } = {}) {
   const child = spawn(NODE, [CLI, ...args], { env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -95,9 +103,20 @@ async function openDashboard() {
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
   });
   win.on('closed', () => (win = null));
-  win.webContents.setWindowOpenHandler(({ url }) => (shell.openExternal(url), { action: 'deny' }));
+  // Links open in the system browser, http(s) only; the window itself never
+  // leaves the dashboard.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const u = new URL(url);
+      if (u.protocol === 'https:' || u.protocol === 'http:') shell.openExternal(url);
+    } catch {}
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (!sameOrigin(url) && !url.startsWith('data:')) event.preventDefault();
+  });
   if (await waitForApi()) await win.loadURL(apiUrl());
-  else await win.loadURL(`data:text/html,<h2 style="font-family:sans-serif">The watcher is not running.</h2><pre>${encodeURIComponent(logTail.slice(-20).join('\n'))}</pre>`);
+  else await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<h2 style="font-family:sans-serif">The watcher is not running.</h2><pre>${esc(logTail.slice(-20).join('\n'))}</pre>`)}`);
   // Smoke test: capture the window and quit.
   if (process.env.MESSAGES_CONTROL_DESKTOP_SCREENSHOT) {
     await new Promise((r) => setTimeout(r, 4000));
@@ -123,8 +142,9 @@ function updateTray() {
   tray.setToolTip(`Messages Control: ${watcher ? 'watching' : 'stopped'}`);
 }
 
+// The token goes only to the dashboard's own origin.
 ipcMain.on('token', (event) => {
-  event.returnValue = config().api?.token ?? '';
+  event.returnValue = sameOrigin(event.senderFrame?.url ?? '') ? config().api?.token ?? '' : '';
 });
 
 app.whenReady().then(() => {
