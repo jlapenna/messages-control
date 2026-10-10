@@ -81,6 +81,9 @@ const { values: flags, positionals } = parseArgs({
   },
 });
 const command = positionals[0] ?? 'run';
+// Set once a shutdown is under way: closing the browser makes in-flight
+// page calls reject, and those rejections must not override the exit code.
+let exiting = false;
 const stateDir = flags['state-dir'];
 const PID_FILE = path.join(stateDir, 'run.pid');
 
@@ -297,7 +300,6 @@ async function main() {
   }
 
   const { context, page } = await launchBrowser({ profileDir: path.join(stateDir, 'profile'), headed: flags.headed });
-  let exiting = false;
   const shutdown = async (code = 0) => {
     if (exiting) return;
     exiting = true;
@@ -307,6 +309,7 @@ async function main() {
     process.exit(code);
   };
   const fatal = (event, message, code) => {
+    if (exiting) return; // our own shutdown closes the browser too
     console.error(message);
     notify(settings, event, message);
     return shutdown(code);
@@ -417,6 +420,10 @@ async function main() {
     }
   }
   page.on('load', mend);
+  // Test hook: pretend the phone unpaired us after N seconds, to exercise the
+  // recovery path (mend → ensurePaired → exit 2) without touching the pairing.
+  const fakeUnpair = Number(process.env.MESSAGES_CONTROL_TEST_UNPAIR_AFTER);
+  if (fakeUnpair > 0) setTimeout(() => fatal('unpaired', 'Not paired with the phone (test hook). Run: messages-control pair --headed', EXIT_UNPAIRED), fakeUnpair * 1000);
   page.on('crash', () => fatal('crash', 'The browser page crashed.', EXIT_ERROR));
   context.on('close', () => fatal('browser-closed', 'The browser closed.', EXIT_ERROR));
   setInterval(mend, 30000);
@@ -424,6 +431,7 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (exiting) return;
   console.error(err.stack ?? String(err));
   process.exit(EXIT_ERROR);
 });
