@@ -98,11 +98,13 @@ loginctl enable-linger        # keep it running while logged out
 
 If the phone unpairs the computer, the watcher notices on its next page
 reload (`reloadMinutes`, 20), signs in again with the browser's Google
-session, and asks the phone to match an emoji: the emoji is saved as
-`pairing-emoji.png` in the state dir and handed to `notifyCommand`
-(`MC_EVENT=pairing-approval`), and the watcher keeps asking (a fresh emoji
-each round, notifications spaced out to an hour) until you tap it in
-Messages on the phone. No window needed. Only when the Google session itself
+session, and asks the phone to confirm: the log and `notifyCommand`
+(`MC_EVENT=pairing-approval`) get the three-digit code in words ("Your
+verification code is 5 9 0…") and the matching emoji is saved as
+`pairing-emoji.png` in the state dir. The watcher keeps asking (a fresh
+code each round, notifications spaced out to an hour) until you tap that
+code in Google Messages on the phone (profile picture → Device pairing if
+no prompt appears). No window needed. Only when the Google session itself
 is gone does it exit `2` (run `pair --headed`); `3` means the LLM endpoint
 kept failing (restarts after 30 s). `notifyCommand` fires on all of these,
 e.g. `telegram-send "$MC_MESSAGE"`.

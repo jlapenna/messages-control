@@ -87,8 +87,14 @@ export async function resumePairing(page, { stateDir, timeout = 10 * 60000, onAp
       if (shown) await emoji.screenshot({ path: file }).catch(() => page.screenshot({ path: file }));
       else await page.screenshot({ path: file });
       announced = true;
-      out(`Approve on the phone: open Google Messages and tap the emoji shown in ${file}`);
-      await onApproval(file);
+      // The page also says it in words (for screen readers): the code and
+      // where to tap it on the phone.
+      const words = await page
+        .evaluate(() => document.body.innerText.replace(/\s+/g, ' ').match(/Your verification code is[^.]*\.[^.]*\./)?.[0] ?? '')
+        .catch(() => '');
+      const message = `Approve on the phone. ${words || 'Open Google Messages and tap the emoji shown in ' + file}`.trim();
+      out(message);
+      await onApproval(file, message);
     }
     await page.waitForTimeout(2000);
   }
