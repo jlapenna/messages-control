@@ -269,17 +269,18 @@
     // back; give the row a moment to reappear before calling it changed.
     const current = (await waitFor(() => listThreads().find((x) => x.id === t.id), 5000)) || null;
     const newer = current && current.msgTime != null && t.msgTime != null && current.msgTime > t.msgTime + STALE_SLACK_MS;
-    // Opening a picture thread swaps its snippet from "Picture" to the text,
-    // so a snippet change only counts when there is no timestamp to go by.
-    const timed = current && current.msgTime != null && t.msgTime != null;
-    if (!current || newer || (!timed && current.text !== t.text)) {
+    // Opening a picture thread swaps its snippet from "Picture" to the text;
+    // that one change is expected when the timestamp agrees. Any other
+    // snippet change means a new message.
+    const swapped = current && isMediaSnippet(t.text) && current.msgTime != null && t.msgTime != null;
+    if (!current || newer || (!swapped && current.text !== t.text)) {
       const what = !current ? 'gone from the list' : newer ? `newer message (${current.timestamp} vs ${t.timestamp})` : `snippet "${current.text.slice(0, 20)}" vs "${t.text.slice(0, 20)}"`;
       return { row: fromVerdict(t, v, `${not}: thread changed since it was checked: ${what}`), done: false };
     }
+    // Spam is blocked & reported or trashed, per settings (read fresh);
+    // marketing is always trashed.
+    const block = !archive && !trash && now.spamAction === 'block';
     try {
-      // Spam is blocked & reported or trashed, per settings (read fresh);
-      // marketing is always trashed.
-      const block = !archive && !trash && now.spamAction === 'block';
       const method = archive ? await archiveThread(t.id) : block ? await blockThread(t.id) : await deleteThread(t.id);
       const done = archive ? outcome.replace('archiving', 'archived') : block ? 'blocked & reported' : 'deleted';
       return { row: { ...fromVerdict(t, v, done), method }, done: true };
