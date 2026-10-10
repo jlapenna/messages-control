@@ -117,10 +117,30 @@ Fields: `match.label` (list), `match.minScore` (number or `"threshold"`),
 `hours`, `keep`, or `spamAction`), `modes`, `enabled`. Threads from saved
 contacts never reach the rules.
 
+## Notifications and the daily digest
+
+```json
+"notify": {
+  "telegram": { "token": "123:abc", "chatId": "42" },
+  "command": "mail -s \"$MC_EVENT\" me@example.com <<< \"$MC_MESSAGE\"",
+  "events": ["pairing-approval", "unpaired", "llm-failing", "digest"]
+}
+```
+
+Telegram gets plain text (the pairing emoji as a photo); `command` runs
+with `MC_EVENT`, `MC_MESSAGE` and `MC_PHOTO` set. Events: `action` (every
+block, delete or archive), `pairing-approval`, `unpaired`, `llm-failing`,
+`crash`, `browser-closed`, `digest`; `events` omitted means all of them.
+
+`messages-control digest [--since 7d] [--send]` summarises the events
+table: counts, each action with the model's reason, what dry run held,
+errors. `install-service --digest 08:00` adds a systemd timer that sends it
+daily.
+
 ## Running as a service
 
 ```sh
-messages-control install-service --live --enable
+messages-control install-service --live --digest 08:00 --enable
 journalctl --user -fu messages-control
 loginctl enable-linger        # keep it running while logged out
                               # (WSL: sudo loginctl enable-linger $USER)
