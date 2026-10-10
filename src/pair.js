@@ -4,11 +4,13 @@ import jsQR from 'jsqr';
 import { PNG } from 'pngjs';
 import QRCode from 'qrcode';
 
-export const MESSAGES_URL = 'https://messages.google.com/web/';
+// MESSAGES_CONTROL_MESSAGES_URL points the whole thing at a stand-in page
+// (the integration tests' mock); the paths under it stay the same.
+export const MESSAGES_URL = (process.env.MESSAGES_CONTROL_MESSAGES_URL ?? 'https://messages.google.com/web/').replace(/\/?$/, '/');
 // The welcome page an unpaired profile lands on only offers Google sign-in
 // (which wants a CAPTCHA from an automated browser); this one still shows
 // the QR code.
-const AUTH_URL = 'https://messages.google.com/web/authentication';
+const AUTH_URL = `${MESSAGES_URL}authentication`;
 export const LIST = 'mws-conversations-list';
 
 // Where the page landed: 'paired' once the conversation list shows,

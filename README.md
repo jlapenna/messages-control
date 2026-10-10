@@ -241,9 +241,16 @@ characters of each checked thread.
 
 ## Development
 
-`npm test` runs unit tests for the classifier parsing and the store. CI
-runs them plus syntax checks. The real page is the only test bed for the
-DOM driver: `messages-control diagnose` and `--headed`.
+`npm test` runs the unit tests (classifier parsing, policies, store, event
+log, notifications, digest, API). `npm run test:integration` runs the real
+CLI, a headless Chromium and the page driver against a mock Messages page
+(`test/integration/mock/`: the same elements and attributes the driver
+relies on, a keyword classifier, and a record of every action the page
+took), end to end: scan, block, STOP + trash, undo, keep, status. CI runs
+both in the required `test` check. The real page remains the test bed for
+selector changes: `messages-control diagnose` and `--headed`; run the mock
+by hand with `node test/integration/mock/server.mjs 7474` and
+`MESSAGES_CONTROL_MESSAGES_URL=http://127.0.0.1:7474/web/`.
 
 - `messages-dom.js`: Google Messages DOM driver (list, read, delete, block,
   archive, diagnose). No `chrome.*` APIs.

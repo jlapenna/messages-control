@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Messages (mock)</title>
+<style>
+  body { font: 14px system-ui, sans-serif; margin: 0; display: grid; grid-template-columns: 340px 1fr; height: 100vh; }
+  mws-conversations-list { display: block; overflow: auto; border-right: 1px solid #ddd; }
+  mws-conversation-list-item { display: block; position: relative; padding: 10px 12px; border-bottom: 1px solid #eee; }
+  mws-conversation-list-item a { color: inherit; text-decoration: none; display: block; }
+  mws-conversation-list-item h2 { font-size: 14px; margin: 0; }
+  mws-conversation-snippet { display: block; color: #555; }
+  mws-relative-timestamp { position: absolute; right: 44px; top: 10px; color: #888; font-size: 12px; }
+  button[data-e2e-conversation-list-item-menu] { position: absolute; right: 8px; top: 8px; }
+  .menu { position: absolute; background: #fff; border: 1px solid #ccc; box-shadow: 0 2px 8px rgba(0,0,0,.2); z-index: 10; }
+  .menu [role=menuitem] { display: block; padding: 8px 14px; cursor: pointer; }
+  .cdk-overlay-backdrop { position: fixed; inset: 0; z-index: 5; }
+  mat-dialog-container { display: block; position: fixed; top: 80px; left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid #ccc; padding: 16px; z-index: 20; min-width: 360px; }
+  .hidden { display: none !important; }
+  main { padding: 16px; overflow: auto; }
+  mws-messages-list { display: block; }
+  mws-message-wrapper { display: block; margin: 8px 0; }
+  mws-message-wrapper[is-outgoing="true"] { text-align: right; }
+  [data-e2e-message-input-box] { border: 1px solid #ccc; padding: 8px; min-height: 20px; margin-top: 16px; }
+  .spam-and-blocked-conv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+  nav.drawer { position: fixed; left: 0; top: 0; bottom: 0; width: 240px; background: #fafafa; border-right: 1px solid #ccc; padding: 12px; z-index: 15; }
+  nav.drawer button { display: block; width: 100%; text-align: left; padding: 8px; }
+</style>
+</head>
+<body>
+<div>
+  <button aria-label="Main menu" id="main-menu">☰</button>
+  <mws-conversations-list id="list"></mws-conversations-list>
+  <button class="load-more hidden" id="load-more">Load more conversations</button>
+</div>
+<main id="main"></main>
+<script>
+// A stand-in for messages.google.com/web with the same structure the driver
+// (messages-dom.js) relies on. State comes from /__state; every action the
+// page performs is posted to /__actions, so a test can assert on it.
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const PAGE = 25;
+  let state = { threads: [], blocked: [], archived: [] };
+  let shown = PAGE;
+  let openMenuFor = null;
+
+  const post = (action) => fetch('/__actions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(action) });
+
+  function route() {
+    const m = /^\/web\/conversations\/([^/?#]+)/.exec(location.pathname);
+    return m ? m[1] : null;
+  }
+
+  function renderList() {
+    const list = $('#list');
+    list.innerHTML = '';
+    const visible = state.threads.filter((t) => !t.gone);
+    for (const t of visible.slice(0, shown)) {
+      const item = document.createElement('mws-conversation-list-item');
+      item.dataset.id = t.id;
+      item.innerHTML = `<a href="/web/conversations/${t.id}"><h2 data-e2e-conversation-name></h2><mws-conversation-snippet></mws-conversation-snippet></a>
+        <mws-relative-timestamp></mws-relative-timestamp>
+        <button data-e2e-conversation-list-item-menu aria-label="Options for ${t.name}" aria-expanded="false">⋮</button>`;
+      $('h2', item).textContent = t.name;
+      $('mws-conversation-snippet', item).textContent = t.snippet;
+      $('mws-relative-timestamp', item).textContent = t.timestamp;
+      $('a', item).addEventListener('click', (e) => {
+        e.preventDefault();
+        history.pushState({}, '', `/web/conversations/${t.id}`);
+        render();
+      });
+      $('button', item).addEventListener('click', (e) => {
+        e.stopPropagation();
+        openMenu(t, e.currentTarget);
+      });
+      list.append(item);
+    }
+    $('#load-more').classList.toggle('hidden', visible.length <= shown);
+  }
+
+  function closeOverlays() {
+    for (const el of document.querySelectorAll('.menu, .cdk-overlay-backdrop, mat-dialog-container, nav.drawer')) el.remove();
+    if (openMenuFor) openMenuFor.setAttribute('aria-expanded', 'false');
+    openMenuFor = null;
+  }
+
+  function openMenu(t, button) {
+    closeOverlays();
+    const backdrop = document.createElement('div');
+    backdrop.className = 'cdk-overlay-backdrop';
+    backdrop.addEventListener('click', closeOverlays);
+    const menu = document.createElement('div');
+    menu.className = 'menu mat-mdc-menu-panel';
+    menu.id = `menu-${t.id}`;
+    menu.setAttribute('role', 'menu');
+    menu.style.top = `${button.getBoundingClientRect().bottom + 4}px`;
+    menu.style.left = `${button.getBoundingClientRect().left - 160}px`;
+    const items = [
+      ['Archive', 'data-e2e-conversation-menu-archive', () => finish(t, 'archive')],
+      ['Move to trash', 'data-e2e-conversation-delete', () => finish(t, 'trash')],
+      ['Block & report spam', 'data-e2e-conversation-menu-block', () => blockDialog(t)],
+    ];
+    for (const [text, attr, fn] of items) {
+      const el = document.createElement('div');
+      el.setAttribute('role', 'menuitem');
+      el.setAttribute(attr, '');
+      el.textContent = text;
+      el.addEventListener('click', () => {
+        closeOverlays();
+        fn();
+      });
+      menu.append(el);
+    }
+    document.body.append(backdrop, menu);
+    button.setAttribute('aria-expanded', 'true');
+    button.setAttribute('aria-controls', menu.id);
+    openMenuFor = button;
+  }
+
+  function blockDialog(t) {
+    const dialog = document.createElement('mat-dialog-container');
+    dialog.setAttribute('role', 'dialog');
+    dialog.innerHTML = `<div data-e2e-block-and-report-spam-dialog><p>You won't receive calls or texts from ${t.name}.</p>
+      <label><input type="checkbox" checked> Report spam</label></div>
+      <button data-e2e-action-button-cancel>Cancel</button> <button data-e2e-action-button-confirm>OK</button>`;
+    $('[data-e2e-action-button-cancel]', dialog).addEventListener('click', closeOverlays);
+    $('[data-e2e-action-button-confirm]', dialog).addEventListener('click', () => {
+      const report = $('input', dialog).checked;
+      closeOverlays();
+      finish(t, report ? 'block_report' : 'block');
+    });
+    document.body.append(dialog);
+  }
+
+  async function finish(t, action) {
+    t.gone = true;
+    await post({ action, id: t.id, name: t.name });
+    // The real list re-renders a moment later, from what the phone knows.
+    state = await (await fetch('/__state')).json();
+    setTimeout(render, 300);
+  }
+
+  function renderThread(id) {
+    const t = state.threads.find((x) => x.id === id);
+    const main = $('#main');
+    if (!t) {
+      main.innerHTML = '<p>No such conversation.</p>';
+      return;
+    }
+    main.innerHTML = `<h1>${t.name}</h1><mws-messages-list></mws-messages-list>
+      <div data-e2e-message-input-box contenteditable="true" role="textbox" aria-label="Type a message to ${t.name}" placeholder="Text message"></div>
+      <button data-e2e-send-text-button aria-label="Send message">Send</button>`;
+    const list = $('mws-messages-list', main);
+    for (const m of t.messages) {
+      const w = document.createElement('mws-message-wrapper');
+      w.setAttribute('is-outgoing', m.outgoing ? 'true' : 'false');
+      if (m.image) w.innerHTML = `<div data-e2e-message-image><img alt=""></div>`;
+      if (m.text) {
+        const part = document.createElement('mws-text-message-part');
+        part.textContent = m.text;
+        w.append(part);
+      }
+      if (m.image) $('img', w).src = m.image;
+      list.append(w);
+    }
+    const box = $('[data-e2e-message-input-box]', main);
+    $('[data-e2e-send-text-button]', main).addEventListener('click', () => {
+      const text = box.innerText.trim();
+      if (!text) return;
+      post({ action: 'send', id: t.id, name: t.name, text }).then(async () => {
+        state = await (await fetch('/__state')).json();
+        renderThread(id);
+      });
+      box.textContent = '';
+    });
+  }
+
+  function render() {
+    renderList();
+    const id = route();
+    if (id) renderThread(id);
+    else $('#main').innerHTML = '<p>Pick a conversation.</p>';
+  }
+
+  function listDialog(view) {
+    closeOverlays();
+    const rows = view === 'Spam & blocked' ? state.blocked : state.archived;
+    const dialog = document.createElement('mat-dialog-container');
+    dialog.setAttribute('role', 'dialog');
+    dialog.innerHTML = `<h1>${view}</h1><div class="rows"></div><button class="done">Done</button>`;
+    for (const r of rows) {
+      const row = document.createElement('div');
+      row.className = 'spam-and-blocked-conv';
+      row.innerHTML = `<div class="info"><h2 class="conv-name"></h2><div></div></div><button></button>`;
+      $('h2', row).textContent = r.name;
+      $('.info div', row).textContent = r.snippet;
+      const btn = $('button', row);
+      btn.textContent = view === 'Archived' ? 'Unarchive' : r.spam ? 'Not spam' : 'Unblock';
+      btn.addEventListener('click', async () => {
+        await post({ action: view === 'Archived' ? 'unarchive' : 'unblock', id: r.id, name: r.name });
+        state = await (await fetch('/__state')).json();
+        row.remove();
+        renderList();
+      });
+      $('.rows', dialog).append(row);
+    }
+    $('.done', dialog).addEventListener('click', closeOverlays);
+    document.body.append(dialog);
+  }
+
+  $('#main-menu').addEventListener('click', () => {
+    if ($('nav.drawer')) return closeOverlays();
+    closeOverlays();
+    const nav = document.createElement('nav');
+    nav.className = 'drawer';
+    nav.setAttribute('role', 'dialog');
+    for (const view of ['Archived', 'Spam & blocked', 'Unpair']) {
+      const b = document.createElement('button');
+      b.textContent = view;
+      b.addEventListener('click', () => (view === 'Unpair' ? closeOverlays() : listDialog(view)));
+      nav.append(b);
+    }
+    document.body.append(nav);
+  });
+  $('#load-more').addEventListener('click', () => {
+    shown += PAGE;
+    renderList();
+  });
+  document.addEventListener('keydown', (e) => e.key === 'Escape' && closeOverlays());
+  window.addEventListener('popstate', render);
+
+  fetch('/__state')
+    .then((r) => r.json())
+    .then((s) => {
+      state = s;
+      render();
+    });
+})();
+</script>
+</body>
+</html>
