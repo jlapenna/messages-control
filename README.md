@@ -93,6 +93,7 @@ overrides the defaults in `settings.js`:
 messages-control install-service --live --enable
 journalctl --user -fu messages-control
 loginctl enable-linger        # keep it running while logged out
+                              # (WSL: sudo loginctl enable-linger $USER)
 ```
 
 Exit codes the unit understands: `2` not paired (it stops rather than

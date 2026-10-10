@@ -440,12 +440,28 @@
     const previous = location.pathname;
     const thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} not in list`);
+    // Another conversation's messages can still be showing after the URL
+    // changes; the list only counts once it differs from what was there.
+    const stale = document.querySelector(MESSAGES_SELECTOR);
+    const staleText = stale?.innerText ?? null;
     try {
       realClick(thread.link);
       if (!(await waitFor(() => isOpen(id), 5000))) throw new Error(`Could not open thread ${id}`);
-      const list = await waitFor(() => document.querySelector(MESSAGES_SELECTOR), 5000);
+      const list = await waitFor(() => {
+        const l = document.querySelector(MESSAGES_SELECTOR);
+        return l && (l !== stale || l.innerText !== staleText) ? l : null;
+      }, 8000);
       if (!list) throw new Error('Message list not found');
-      await sleep(1500); // let pictures load
+      // Messages render after the list, and pictures after that (a spinner
+      // sits in the image part while it loads); a cold open takes seconds.
+      await waitFor(() => list.querySelector('mws-message-wrapper, mws-text-message-part'), 8000);
+      await waitFor(
+        () =>
+          !list.querySelector('mws-image-message-part mws-spinner') &&
+          [...list.querySelectorAll('[data-e2e-message-image] img')].every((i) => i.complete && i.naturalWidth > 0),
+        8000,
+      );
+      await sleep(500);
       // Real page (2026-10): each message is an mws-message-wrapper; its text
       // is mws-text-message-part (nested [data-e2e-text-message-content]
       // repeats it, so read only the part), pictures are [data-e2e-message-image] img with same-origin blob:
@@ -471,6 +487,8 @@
         const back = threadId(previous) && findThread(threadId(previous));
         if (back) realClick(back.link);
         else history.back();
+        // Don't return mid-navigation: the next open would click into it.
+        await waitFor(() => location.pathname === previous, 5000);
       }
     }
   }
