@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Messages Control</title>
+<style>
+  :root { --bg: #fafafa; --fg: #1f2328; --muted: #6a737d; --line: #e1e4e8; --card: #fff; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --accent: #0969da; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0d1117; --fg: #e6edf3; --muted: #8b949e; --line: #30363d; --card: #161b22; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 14px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
+  header h1 { margin: 0; font-size: 18px; }
+  header .pill { padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+  .pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); } .pill.warn { color: var(--warn); border-color: var(--warn); }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  section h2 { margin: 0 0 8px; font-size: 14px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .stat b { display: block; font-size: 22px; } .stat span { color: var(--muted); font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { text-align: left; padding: 6px 6px; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; } th { color: var(--muted); font-weight: 600; border-top: 0; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
+  td.reason { color: var(--muted); }
+  col.when { width: 9em; } col.name { width: 13em; } col.outcome { width: 17em; } col.actions { width: 5em; } col.acts4 { width: 17em; }
+  button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  button:hover { border-color: var(--accent); } button.danger { color: var(--bad); } button:disabled { opacity: .5; cursor: default; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .label { padding: 1px 6px; border-radius: 4px; font-size: 12px; border: 1px solid var(--line); }
+  .label.spam, .label.error { color: var(--bad); } .label.marketing { color: #8250df; } .label.otp { color: var(--accent); } .label.notice, .label.review, .label.held { color: var(--warn); } .label.ok, .label.undo { color: var(--ok); }
+  #token { width: 100%; max-width: 420px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+  .muted { color: var(--muted); } .err { color: var(--bad); }
+  @media (max-width: 640px) { td.reason, th:nth-child(4), col.when { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Messages Control</h1>
+  <span id="health" class="pill">…</span>
+  <span id="modepill" class="pill"></span>
+  <span id="lastscan" class="muted"></span>
+  <span style="flex:1"></span>
+  <button id="scan" title="Scan the list now">Scan now</button>
+  <button id="refresh">Refresh</button>
+</header>
+<main>
+  <section id="auth">
+    <h2>Token</h2>
+    <p class="muted">The API token from <code>api.token</code> in the config (also printed by <code>messages-control status</code>). Kept in this browser only.</p>
+    <input id="token" type="password" placeholder="paste the token"> <button id="save">Use</button> <span id="autherr" class="err"></span>
+  </section>
+  <section>
+    <h2>Last 24 hours</h2>
+    <div class="stats" id="stats"></div>
+  </section>
+  <section>
+    <h2>Review queue</h2>
+    <div id="review" class="muted">…</div>
+  </section>
+  <section>
+    <h2>Recent activity</h2>
+    <div id="events" class="muted">…</div>
+  </section>
+  <section>
+    <h2>Rules in force</h2>
+    <div id="policies" class="muted">…</div>
+  </section>
+</main>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let token = '';
+  try { token = localStorage.getItem('mc.token') || ''; } catch {}
+  $('token').value = token;
+  const api = async (path, opts = {}) => {
+    const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...(opts.headers || {}) } });
+    if (res.status === 401) { $('auth').hidden = false; $('autherr').textContent = 'The token was not accepted.'; throw new Error('unauthorized'); }
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  };
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const pct = (x) => x == null ? '' : `${Math.round(x * 100)}%`;
+  const label = (l) => `<span class="label ${esc(l)}">${esc(l)}</span>`;
+
+  async function load() {
+    const [status, review, events, policies] = await Promise.all([api('/api/status'), api('/api/review'), api('/api/events?limit=60'), api('/api/policies')]);
+    $('auth').hidden = true; $('autherr').textContent = '';
+    $('health').textContent = status.ok ? 'healthy' : (status.paired ? 'page not answering' : 'NOT PAIRED');
+    $('health').className = `pill ${status.ok ? 'ok' : 'bad'}`;
+    $('modepill').textContent = `${status.mode} · ${status.dryRun ? 'dry run' : 'live'} · spam → ${status.spamAction}`;
+    $('modepill').className = `pill ${status.dryRun ? 'warn' : ''}`;
+    $('lastscan').textContent = status.lastScan ? `last scan ${when(status.lastScan.time)}: ${status.lastScan.summary}` : 'no scan yet';
+    const c = status.last24h;
+    $('stats').innerHTML = [['blocked', c.blocked], ['deleted', c.deleted], ['archived', c.archived], ['held by dry run', c.dryRun], ['errors', c.errors], ['LLM calls (process)', status.llm.calls], ['LLM failures', status.llm.failures]]
+      .map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+    $('review').innerHTML = review.length ? `<table><colgroup><col class="name"><col class="outcome"><col><col class="acts4"></colgroup><tr><th>Sender</th><th>Verdict</th><th>Reason</th><th></th></tr>${review.map((r) => `
+      <tr data-id="${esc(r.id)}"><td class="name">${esc(r.name || r.id.slice(0, 10) + '…')}</td><td class="outcome">${label(r.label)} ${pct(r.score)}</td><td class="reason">${esc(r.reason)}</td>
+      <td class="actions"><button data-act="keep">Keep</button><button data-act="archive">Archive</button><button data-act="block" class="danger">Block</button><button data-act="trash" class="danger">Trash</button></td></tr>`).join('')}</table>`
+      : '<span class="muted">Nothing held for review.</span>';
+    $('events').innerHTML = events.length ? `<table><colgroup><col class="when"><col class="name"><col class="outcome"><col><col class="actions"></colgroup><tr><th>When</th><th>Sender</th><th>Outcome</th><th>Reason</th><th></th></tr>${events.map((e) => `
+      <tr><td class="num">${when(e.time)}</td><td class="name">${esc(e.name || '')}</td><td class="outcome">${label(e.label)} ${esc(e.outcome).slice(0, 60)}${e.rule ? ` <span class="muted">[${esc(e.rule)}]</span>` : ''}</td><td class="reason">${esc(e.reason || '')}</td>
+      <td class="actions">${/^(blocked|archived)/.test(e.outcome || '') ? `<button data-undo="${e.id}">Undo</button>` : ''}</td></tr>`).join('')}</table>` : '<span class="muted">No events yet.</span>';
+    $('policies').innerHTML = `<table><colgroup><col class="name"><col><col class="outcome"></colgroup><tr><th>Rule</th><th>Match</th><th>Action</th></tr>${policies.rules.map((r) => `<tr><td>${esc(r.name)}</td><td><code>${esc(JSON.stringify(r.match))}</code></td><td>${esc(r.action)}${r.hours ? ` ${r.hours} h` : ''}</td></tr>`).join('')}</table>
+      <p class="muted">threshold ${policies.threshold} · ${policies.dryRun ? 'dry run: actions are logged, not taken' : 'live'}</p>`;
+  }
+  const busy = (el, on) => el.querySelectorAll('button').forEach((b) => (b.disabled = on));
+  document.addEventListener('click', async (ev) => {
+    const b = ev.target.closest('button'); if (!b) return;
+    try {
+      if (b.dataset.act) {
+        const row = b.closest('tr'); busy(row, true);
+        if (/^(block|trash)$/.test(b.dataset.act) && !confirm(`${b.dataset.act} this thread?`)) { busy(row, false); return; }
+        await api('/api/act', { method: 'POST', body: JSON.stringify({ id: row.dataset.id, action: b.dataset.act }) });
+        await load();
+      } else if (b.dataset.undo) {
+        busy(b.closest('tr'), true);
+        await api('/api/undo', { method: 'POST', body: JSON.stringify({ event: Number(b.dataset.undo) }) });
+        await load();
+      } else if (b.id === 'scan') {
+        b.disabled = true; b.textContent = 'Scanning…';
+        const r = await api('/api/scan', { method: 'POST', body: '{}' });
+        b.disabled = false; b.textContent = 'Scan now';
+        $('lastscan').textContent = r.summary || '';
+        await load();
+      } else if (b.id === 'refresh') await load();
+      else if (b.id === 'save') {
+        token = $('token').value.trim();
+        try { localStorage.setItem('mc.token', token); } catch {}
+        await load();
+      }
+    } catch (err) {
+      if (err.message !== 'unauthorized') alert(err.message);
+    }
+  });
+  load().catch(() => { $('auth').hidden = false; });
+  setInterval(() => { if ($('auth').hidden) load().catch(() => {}); }, 30000);
+})();
+</script>
+</body>
+</html>

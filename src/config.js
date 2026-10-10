@@ -39,7 +39,13 @@ const MODES = {
 // environment, then command-line overrides, then what the mode forces.
 export function loadSettings(overrides = {}) {
   const env = process.env.MESSAGES_CONTROL_API_KEY ? { apiKey: process.env.MESSAGES_CONTROL_API_KEY } : {};
-  const s = { ...DEFAULTS, ...readConfig(), ...env, ...overrides };
+  const file = readConfig();
+  const s = { ...DEFAULTS, ...file, ...env, ...overrides };
+  // Nested settings (api, notify) merge key by key, so a config that only
+  // sets api.token keeps the default port.
+  for (const key of ['api', 'notify']) {
+    if (DEFAULTS[key] && typeof DEFAULTS[key] === 'object') s[key] = { ...DEFAULTS[key], ...(file[key] ?? {}), ...(overrides[key] ?? {}) };
+  }
   if (!MODES[s.mode]) throw new Error(`unknown mode "${s.mode}" (spam or full)`);
   return { ...s, ...MODES[s.mode] };
 }
