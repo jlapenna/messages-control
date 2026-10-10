@@ -364,15 +364,23 @@ async function main() {
   async function ensurePaired() {
     if ((await waitForState(page)) === 'paired') return;
     // Headless: sign in again with the Google session and ask the phone to
-    // approve (the emoji); `pair` waits longer than the watcher.
-    const resumed = await resumePairing(page, {
-      stateDir,
-      timeout: (command === 'pair' ? 30 : 10) * 60000,
-      onApproval: (file) => notify(settings, 'pairing-approval', `Approve on the phone: open Google Messages and match the emoji in ${file}`),
-    });
-    if (resumed) {
-      console.log('Paired again.');
-      return;
+    // approve (the emoji). The watcher keeps asking, with a fresh emoji each
+    // round and the notifications spaced out, so a tap at any time heals it;
+    // one-off commands try once and exit 2.
+    const onApproval = (file) =>
+      notify(settings, 'pairing-approval', `Approve on the phone: open Google Messages and match the emoji in ${file}`);
+    for (let round = 0; ; round++) {
+      const resumed = await resumePairing(page, { stateDir, timeout: (command === 'pair' ? 30 : 10) * 60000, onApproval });
+      if (resumed) {
+        console.log('Paired again.');
+        return;
+      }
+      if (command !== 'run' || flags.headed) break;
+      const delay = Math.min(60, 5 * 2 ** round);
+      console.log(`No approval yet; asking again in ${delay} min.`);
+      await page.waitForTimeout(delay * 60000);
+      await page.goto(MESSAGES_URL, { waitUntil: 'domcontentloaded' }).catch(() => {});
+      if ((await waitForState(page).catch(() => null)) === 'paired') return;
     }
     if (!flags.headed && command !== 'pair') {
       await fatal('unpaired', 'Not paired with the phone. Run: messages-control pair --headed', EXIT_UNPAIRED);

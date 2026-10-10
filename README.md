@@ -96,10 +96,16 @@ loginctl enable-linger        # keep it running while logged out
                               # (WSL: sudo loginctl enable-linger $USER)
 ```
 
-Exit codes the unit understands: `2` not paired (it stops rather than
-spinning; run `pair --headed`), `3` the LLM endpoint kept failing (restarts
-after 30 s). `notifyCommand` fires on both, e.g.
-`telegram-send "$MC_MESSAGE"`.
+If the phone unpairs the computer, the watcher notices on its next page
+reload (`reloadMinutes`, 20), signs in again with the browser's Google
+session, and asks the phone to match an emoji: the emoji is saved as
+`pairing-emoji.png` in the state dir and handed to `notifyCommand`
+(`MC_EVENT=pairing-approval`), and the watcher keeps asking (a fresh emoji
+each round, notifications spaced out to an hour) until you tap it in
+Messages on the phone. No window needed. Only when the Google session itself
+is gone does it exit `2` (run `pair --headed`); `3` means the LLM endpoint
+kept failing (restarts after 30 s). `notifyCommand` fires on all of these,
+e.g. `telegram-send "$MC_MESSAGE"`.
 
 ## Privacy
 
