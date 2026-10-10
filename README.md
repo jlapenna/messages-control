@@ -184,6 +184,22 @@ Prometheus scrape config:
 Alert on `messages_control_healthy == 0` (or the target going down) and on
 `increase(messages_control_llm_failures_total[1h]) > 5`.
 
+## Desktop app
+
+`desktop/` is an Electron shell for people who don't want a terminal: it
+runs the watcher, shows the dashboard in a window, offers "Pair with
+phone…" from the tray (opens the sign-in window) and restarts the watcher
+on failure, like the systemd unit.
+
+```sh
+cd desktop && npm install && npm start          # development
+npm run dist                                    # desktop/dist/ (electron-builder)
+```
+
+It expects Node and the repo's `node_modules` (`npm install` at the top
+level, `npx playwright install chromium`) beside it; `MESSAGES_CONTROL_NODE`
+points it at a specific node binary.
+
 ## Running as a service
 
 ```sh
