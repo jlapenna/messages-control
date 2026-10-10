@@ -1,0 +1,102 @@
+[
+  {
+    "id": "t-scam",
+    "name": "(555) 010-0199",
+    "snippet": "USPS: your package is held, confirm your address at http://usps-redeliver.example",
+    "timestamp": "3:15 PM",
+    "messages": [
+      {
+        "text": "USPS: your package is held, confirm your address at http://usps-redeliver.example"
+      }
+    ]
+  },
+  {
+    "id": "t-political",
+    "name": "(555) 010-0200",
+    "snippet": "Joseph, vote YES on Prop 9 and donate today!",
+    "timestamp": "2:40 PM",
+    "messages": [
+      {
+        "text": "Joseph, vote YES on Prop 9 and donate today!"
+      }
+    ]
+  },
+  {
+    "id": "t-marketing",
+    "name": "22822",
+    "snippet": "Old Navy: FLASH SALE 40% off everything. Reply STOP to opt out",
+    "timestamp": "1:02 PM",
+    "messages": [
+      {
+        "text": "Old Navy: FLASH SALE 40% off everything. Reply STOP to opt out"
+      }
+    ]
+  },
+  {
+    "id": "t-otp",
+    "name": "262966",
+    "snippet": "Your verification code is 482913",
+    "timestamp": "2 min",
+    "messages": [
+      {
+        "text": "Your verification code is 482913"
+      }
+    ]
+  },
+  {
+    "id": "t-notice",
+    "name": "898287",
+    "snippet": "CVS: your order is ready for pickup",
+    "timestamp": "Yesterday",
+    "messages": [
+      {
+        "text": "CVS: your order is ready for pickup"
+      }
+    ]
+  },
+  {
+    "id": "t-shipment",
+    "name": "28777",
+    "snippet": "Your Amazon order #114-2938471 has shipped",
+    "timestamp": "11:05 AM",
+    "messages": [
+      {
+        "text": "Your Amazon order #114-2938471 has shipped"
+      }
+    ]
+  },
+  {
+    "id": "t-friend",
+    "name": "(555) 010-0300",
+    "snippet": "hey, still on for 6?",
+    "timestamp": "10:00 AM",
+    "messages": [
+      {
+        "text": "hey, still on for 6?"
+      }
+    ]
+  },
+  {
+    "id": "t-contact",
+    "name": "Katy Skaggs",
+    "snippet": "YOU TOOOO",
+    "timestamp": "Fri",
+    "messages": [
+      {
+        "text": "YOU TOOOO"
+      }
+    ]
+  },
+  {
+    "id": "t-picture",
+    "name": "(555) 010-0400",
+    "snippet": "Picture",
+    "timestamp": "9:00 AM",
+    "messages": [
+      {
+        "text": "Joseph, vote NO on Measure G",
+        "image": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2MwMCIvPjx0ZXh0IHg9IjIwIiB5PSIxMTAiIGZvbnQtc2l6ZT0iNDAiIGZpbGw9IiNmZmYiPlZPVEUgTk88L3RleHQ+PC9zdmc+"
+      }
+    ]
+  }
+]

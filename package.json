@@ -4,9 +4,11 @@
   "description": "Watches Google Messages for Web and sorts spam, codes and notices with an LLM",
   "main": "background.js",
   "scripts": {
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
     "start": "node bin/messages-control.js",
-    "prepare": "husky"
+    "prepare": "husky",
+    "test:integration": "node --test test/integration/*.test.js",
+    "test:all": "npm test && npm run test:integration"
   },
   "repository": {
     "type": "git",

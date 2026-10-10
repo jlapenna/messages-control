@@ -16,3 +16,8 @@ jobs:
       - run: for f in *.js src/*.js bin/*.js; do node --check "$f"; done
       - run: node -e 'JSON.parse(require("fs").readFileSync("manifest.json"))'
       - run: npm test
+      # End to end against a mock Messages page (test/integration): the real
+      # CLI, headless Chromium and page driver. Part of the required "test"
+      # check on purpose: one consumer, one lane.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:integration
