@@ -32,7 +32,9 @@
   "files": [
     "bin",
     "src",
-    "*.js",
+    "content.js",
+    "messages-dom.js",
+    "settings.js",
     "README.md",
     "LICENSE"
   ]

@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, markThread, diagnose } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -76,8 +76,9 @@
   // Bump when classification changes enough that old verdicts should be redone
   // (2: spam_probability scoring and picture checks; 3: notifications;
   // 4: byModel, so codes can be archived; 5: marketing; 6: utility and bank
-  // alerts are no longer marketing).
-  const VERDICT_VERSION = 6;
+  // alerts are no longer marketing; 7: a missing picture no longer caps the
+  // score, so only verdicts made without their picture are redone).
+  const VERDICT_VERSION = 7;
   // A verdict is reused only for the same preview text and the same latest
   // message: picture threads all say "Picture", so a newer message (by list
   // timestamp, 5 minutes' slack for "34 min" drifting) invalidates it.
@@ -87,8 +88,10 @@
   // 6 narrowed marketing, 5 split marketing out of "ok", 4 changed codes.
   const versionOk = (v) =>
     v.version === VERDICT_VERSION ||
-    (v.label !== 'marketing' &&
-      (v.version === 5 || (v.label !== 'ok' && (v.version === 4 || (v.version === 3 && v.label !== 'otp')))));
+    (v.media !== 'picture not retrieved' &&
+      (v.version === 6 ||
+        (v.label !== 'marketing' &&
+          (v.version === 5 || (v.label !== 'ok' && (v.version === 4 || (v.version === 3 && v.label !== 'otp')))))));
   const cached = (verdicts, t) => {
     const v = verdicts[t.id];
     if (!v || v.text !== t.text || !versionOk(v)) return null;
@@ -262,10 +265,16 @@
     // The thread itself may have changed: the list snapshot can be minutes
     // old by now (LLM calls, opened picture threads), and a new message could
     // be in it, e.g. a fresh login code in an old notice thread.
-    const current = listThreads().find((x) => x.id === t.id);
+    // Opening the thread for its pictures re-renders the list on the way
+    // back; give the row a moment to reappear before calling it changed.
+    const current = (await waitFor(() => listThreads().find((x) => x.id === t.id), 5000)) || null;
     const newer = current && current.msgTime != null && t.msgTime != null && current.msgTime > t.msgTime + STALE_SLACK_MS;
-    if (!current || current.text !== t.text || newer) {
-      return { row: fromVerdict(t, v, `${not}: thread changed since it was checked`), done: false };
+    // Opening a picture thread swaps its snippet from "Picture" to the text,
+    // so a snippet change only counts when there is no timestamp to go by.
+    const timed = current && current.msgTime != null && t.msgTime != null;
+    if (!current || newer || (!timed && current.text !== t.text)) {
+      const what = !current ? 'gone from the list' : newer ? `newer message (${current.timestamp} vs ${t.timestamp})` : `snippet "${current.text.slice(0, 20)}" vs "${t.text.slice(0, 20)}"`;
+      return { row: fromVerdict(t, v, `${not}: thread changed since it was checked: ${what}`), done: false };
     }
     try {
       // Spam is blocked & reported or trashed, per settings (read fresh);
@@ -363,7 +372,8 @@
         threads = listThreads(); // scrolling may have re-rendered rows
       }
 
-      if (processAll) {
+      // "Check pictures now" covers picture threads anywhere in the history.
+      if (processAll || checkPictures) {
         const { threads: all } = await loadAllThreads();
         threads = all;
       }
@@ -376,7 +386,7 @@
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
       const rows = new Map();
-      const shown = () => (processAll ? threads : threads.slice(0, Math.max(LABEL_SCOPE, settings.topN)));
+      const shown = () => (processAll || checkPictures ? threads : threads.slice(0, Math.max(LABEL_SCOPE, settings.topN)));
       const publish = (summary) =>
         saveScan(summary, [...new Set([...shown(), ...threads.filter((t) => rows.has(t.id))])].map((t) => rows.get(t.id) ?? knownRow(t, { settings, verdicts })));
 
@@ -394,11 +404,13 @@
       // Display-only labels for existing threads; decide() never deletes
       // them because isNew is false.
       verdicts = await loadVerdicts();
+      // A verdict made without its picture ("picture not retrieved") is
+      // redone by "Check pictures now".
       const unlabelled = shown().filter(
         (t) =>
           !rows.has(t.id) &&
           !isSkippedContact(t, settings) &&
-          !cached(verdicts, t) &&
+          (!cached(verdicts, t) || (checkPictures && needsOpen(t) && cached(verdicts, t).media === 'picture not retrieved')) &&
           (!needsOpen(t) || canOpen(false)) &&
           (attempts.get(t.id) ?? 0) < MAX_ATTEMPTS,
       );
