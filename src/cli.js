@@ -367,8 +367,7 @@ async function main() {
     // approve (the emoji). The watcher keeps asking, with a fresh emoji each
     // round and the notifications spaced out, so a tap at any time heals it;
     // one-off commands try once and exit 2.
-    const onApproval = (file) =>
-      notify(settings, 'pairing-approval', `Approve on the phone: open Google Messages and match the emoji in ${file}`);
+    const onApproval = (file, message) => notify(settings, 'pairing-approval', `${message} (picture: ${file})`);
     for (let round = 0; ; round++) {
       const resumed = await resumePairing(page, { stateDir, timeout: (command === 'pair' ? 30 : 10) * 60000, onApproval });
       if (resumed) {
