@@ -54,6 +54,8 @@ Commands (default: run)
                    threshold, in full mode)
   act ID ACTION    block, trash, archive or keep one thread (ID may be a
                    prefix; block/trash/archive need --live)
+  send ID TEXT     send a text in one thread (--live); the path the opt-in
+                   STOP reply to marketing uses
   undo EVENT       undo a block or an archive by its event number (from
                    log); a trashed thread has no undo in Messages for web
   policy show      the rules in force (defaults, mode and config applied)
@@ -82,7 +84,7 @@ To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
   'run', 'pair', 'scan', 'sweep', 'act-on-spam', 'check-pictures', 'diagnose', 'log', 'clear-log',
-  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo',
+  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo', 'send',
 ]);
 
 const { values: flags, positionals } = parseArgs({
@@ -365,7 +367,7 @@ async function status(settings, store, db) {
 }
 
 async function main() {
-  if (flags.help || !COMMANDS.has(command) || (command === 'act' && !(positionals[1] && /^(block|trash|archive|keep)$/.test(positionals[2] ?? ''))) || (command === 'undo' && !/^#?\d+$/.test(positionals[1] ?? ''))) {
+  if (flags.help || !COMMANDS.has(command) || (command === 'act' && !(positionals[1] && /^(block|trash|archive|keep)$/.test(positionals[2] ?? ''))) || (command === 'undo' && !/^#?\d+$/.test(positionals[1] ?? '')) || (command === 'send' && !(positionals[1] && positionals[2]))) {
     console.log(USAGE);
     process.exit(flags.help ? 0 : 2);
   }
@@ -447,7 +449,21 @@ async function main() {
     },
     onFatal: (message) => fatal('llm-failing', message, EXIT_LLM),
   });
-  await page.exposeFunction('__mcSend', (msg) => backend.handle(msg));
+  // Typing into the compose box: the page only sends on trusted input
+  // events, so this happens here with a real keyboard and mouse.
+  async function typeAndSend(text) {
+    try {
+      const box = page.getByRole('textbox', { name: /message/i }).first();
+      await box.click({ timeout: 5000 });
+      await page.keyboard.type(text);
+      const send = page.locator('[data-e2e-send-text-button]:visible').first();
+      await send.click({ timeout: 5000 });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message.split('\n')[0] };
+    }
+  }
+  await page.exposeFunction('__mcSend', (msg) => (msg.type === 'sendText' ? typeAndSend(String(msg.text ?? '')) : backend.handle(msg)));
   await page.exposeFunction('__mcStorage', (op, arg) => {
     const res = store[op](arg) ?? {};
     // Keep the queryable copy of the verdicts current.
@@ -543,6 +559,7 @@ async function main() {
     diagnose: { type: 'diagnose' },
     undo: undoMsg,
     act: { type: 'act', id: positionals[1], action: positionals[2], live: flags.live },
+    send: { type: 'send', id: positionals[1], text: positionals.slice(2).join(' '), live: flags.live },
     scan: { type: 'scanNow', includeSeen: flags['include-seen'] },
     sweep: { type: 'scanNow', processAll: true },
     'act-on-spam': { type: 'scanNow', trashSpam: true },
@@ -552,7 +569,7 @@ async function main() {
     if (!(await waitForRows())) console.warn('No conversation rows appeared; the inbox may be empty.');
     const res = await deliver(oneOff[command]);
     if (command === 'diagnose') console.log(JSON.stringify(res?.report ?? res, null, 2));
-    else if (command === 'act' || command === 'undo') {
+    else if (command === 'act' || command === 'undo' || command === 'send') {
       if (!res?.ok) {
         console.error(res?.error ?? 'no answer from the page');
         return shutdown(EXIT_ERROR);

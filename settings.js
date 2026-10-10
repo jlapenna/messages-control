@@ -125,6 +125,11 @@ export const DEFAULTS = {
   topN: 20,
   // Label existing threads for display (badge, side panel). Off in spam mode.
   labelExisting: true,
+  // Opt-in: reply STOP (or unsubscribeText) to a marketing sender before its
+  // thread is trashed, so the texts stop coming. Sends a message from the
+  // phone, so off by default.
+  unsubscribeMarketing: false,
+  unsubscribeText: 'STOP',
   // Standalone only: reload the page this often (between scans) so a pairing
   // revoked from the phone is noticed.
   reloadMinutes: 20,

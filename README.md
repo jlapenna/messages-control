@@ -87,6 +87,7 @@ overrides the defaults in `settings.js`:
 | `threshold` | `0.8` | spam probability needed to act |
 | `skipNamedContacts` | `true` | never touch threads whose name has no digits |
 | `openPictureThreads` | `true` | open picture threads so the model sees them (marks them read) |
+| `unsubscribeMarketing` | `false` | reply `unsubscribeText` (`STOP`) to a marketing sender before trashing its thread |
 | `notifyCommand` | | shell command run on every action and failure, with `MC_EVENT` and `MC_MESSAGE` set |
 | `prompt` | see `settings.js` | the classifier instructions |
 

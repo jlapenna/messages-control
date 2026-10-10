@@ -508,6 +508,63 @@
     };
   }
 
+  // Sends a text in a thread: open it, type into the compose box (a
+  // contenteditable; execCommand fires the input events Angular listens
+  // for), press Send, and wait for the message to show as sent. Used for
+  // the opt-in STOP reply to marketing. Goes back to the list afterwards.
+  async function sendText(id, text) {
+    const previous = location.pathname;
+    const thread = findThread(id);
+    if (!thread) throw new Error(`Thread ${id} not in list`);
+    try {
+      realClick(thread.link);
+      if (!(await waitFor(() => isOpen(id), 5000))) throw new Error(`Could not open thread ${id}`);
+      const box = await waitFor(() => [...document.querySelectorAll('[data-e2e-message-input-box], textarea[placeholder*="message" i]')].find(visible), 8000);
+      if (!box) throw new Error('Compose box not found');
+      // Outgoing messages carry is-outgoing="true" on their wrapper.
+      const outgoing = () =>
+        [...(document.querySelector(MESSAGES_SELECTOR)?.querySelectorAll('mws-message-wrapper[is-outgoing="true"]') ?? [])].filter((w) => w.innerText.includes(text)).length;
+      const before = outgoing();
+      if (globalThis.MessagesControlStandalone && globalThis.__mcSend) {
+        // The page only sends on trusted input events: the Node side types
+        // and clicks with a real keyboard and mouse.
+        const r = await globalThis.__mcSend({ type: 'sendText', text });
+        if (!r?.ok) throw new Error(r?.error ?? 'typing failed');
+      } else {
+        box.click();
+        box.focus();
+        if (box.isContentEditable) {
+          const range = document.createRange();
+          range.selectNodeContents(box);
+          range.collapse(false);
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          document.execCommand('insertText', false, text);
+        } else {
+          box.value = text;
+          box.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        // There are two send buttons (one per message type); only one shows.
+        const send = await waitFor(() => {
+          const all = [...document.querySelectorAll('[data-e2e-send-text-button]'), ...document.querySelectorAll('button')].filter((x) => x.hasAttribute('data-e2e-send-text-button') || /^send/i.test(x.getAttribute('aria-label') ?? ''));
+          return all.find((b) => visible(b) && !b.disabled) ?? null;
+        }, 5000);
+        if (!send) throw new Error('Send button not found or disabled');
+        send.click();
+      }
+      if (!(await waitFor(() => outgoing() > before, 10000))) throw new Error('Message did not show as sent');
+      return true;
+    } finally {
+      if (location.pathname !== previous) {
+        const back = threadId(previous) && findThread(threadId(previous));
+        if (back) realClick(back.link);
+        else history.back();
+        await waitFor(() => location.pathname === previous, 5000);
+      }
+    }
+  }
+
   // "Spam & blocked" and "Archived" are dialogs off the main menu, one row
   // per thread with its own button (Unblock / Not spam, Unarchive). Finds
   // the row by the sender's name and clicks that button.
@@ -556,5 +613,5 @@
   const unblockThread = (name) => undoInDialog('Spam & blocked', name, /^(unblock|not spam)$/i);
   const unarchiveThread = (name) => undoInDialog('Archived', name, /^unarchive$/i);
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
 })();
