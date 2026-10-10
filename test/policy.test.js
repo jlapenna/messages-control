@@ -16,7 +16,17 @@ const thread = (hoursAgo, recent = false) => ({ msgTime: now - hoursAgo * 360000
 
 test('spam mode has only the spam and marketing rules', () => {
   assert.deepEqual(policy.rules(spam).map((r) => r.name), ['spam-block', 'marketing-delete']);
-  assert.deepEqual(policy.rules(full).map((r) => r.name), ['spam-block', 'marketing-delete', 'otp-archive', 'notice-archive']);
+  assert.deepEqual(policy.rules(full).map((r) => r.name), ['spam-block', 'spam-review', 'marketing-delete', 'otp-archive', 'notice-archive']);
+});
+
+test('spam-ish under the threshold is held for review in full mode only', () => {
+  const v = { label: 'spam', score: 0.6 };
+  const d = policy.decide(v, { isNew: true, settings: full, thread: thread(1) });
+  assert.equal(d.rule, 'spam-review');
+  assert.equal(d.hold, true);
+  assert.equal(d.outcome, 'held for review');
+  assert.equal(policy.decide(v, { isNew: true, settings: spam, thread: thread(1) }).outcome, 'kept: below 80% threshold');
+  assert.equal(policy.decide({ label: 'spam', score: 0.3 }, { isNew: true, settings: full, thread: thread(1) }).outcome, 'kept: below 80% threshold');
 });
 
 test('spam at or above the threshold is blocked (spamAction) when new, kept when existing', () => {

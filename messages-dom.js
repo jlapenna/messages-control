@@ -508,5 +508,48 @@
     };
   }
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, markThread, diagnose, waitFor, sleep };
+  // "Spam & blocked" and "Archived" are dialogs off the main menu, one row
+  // per thread with its own button (Unblock / Not spam, Unarchive). Finds
+  // the row by the sender's name and clicks that button.
+  async function undoInDialog(view, name, buttonRe) {
+    const menu = document.querySelector('button[aria-label="Main menu"]');
+    if (!menu) throw new Error('Main menu button not found');
+    menu.click();
+    const item = await waitFor(() => [...document.querySelectorAll('button')].find((b) => visible(b) && b.innerText.trim() === view), 5000);
+    if (!item) throw new Error(`"${view}" not in the main menu`);
+    item.click();
+    // (The nav drawer is a role="dialog" too and names the view; the real
+    // one is a mat-dialog-container.)
+    const dialog = await waitFor(() => [...document.querySelectorAll('mat-dialog-container')].find((d) => visible(d) && d.innerText.includes(view)), 8000);
+    if (!dialog) throw new Error(`"${view}" dialog did not open`);
+    // The rows load after the dialog; an empty list shows nothing to wait for.
+    await waitFor(() => [...dialog.querySelectorAll('button')].some((b) => buttonRe.test(b.innerText.trim())), 8000);
+    await sleep(500);
+    const target = name.replace(/\s+/g, ' ').trim();
+    const button = [...dialog.querySelectorAll('button')].find((b) => {
+      if (!buttonRe.test(b.innerText.trim())) return false;
+      // The row is the nearest ancestor that holds the name but not the whole list.
+      for (let el = b.parentElement; el && el !== dialog; el = el.parentElement) {
+        const text = el.innerText.replace(/\s+/g, ' ');
+        if (text.includes(target)) return (text.match(/Unblock|Not spam|Unarchive/g) ?? []).length <= 1;
+      }
+      return false;
+    });
+    try {
+      if (!button) throw new Error(`${target} is not listed under "${view}"`);
+      const label = button.innerText.trim();
+      realClick(button);
+      await sleep(1500);
+      return label;
+    } finally {
+      const done = [...dialog.querySelectorAll('button')].find((b) => /^done$/i.test(b.innerText.trim()));
+      if (done && visible(done)) realClick(done);
+      else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(500);
+    }
+  }
+  const unblockThread = (name) => undoInDialog('Spam & blocked', name, /^(unblock|not spam)$/i);
+  const unarchiveThread = (name) => undoInDialog('Archived', name, /^unarchive$/i);
+
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, markThread, diagnose, waitFor, sleep };
 })();

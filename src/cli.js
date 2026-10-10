@@ -48,6 +48,12 @@ Commands (default: run)
   install-service  write a systemd user unit; --enable starts it now
   uninstall-service
   digest           summary of the last day (--since 7d; --send sends it)
+  review           threads the rules hold for a person (spam-ish, under the
+                   threshold, in full mode)
+  act ID ACTION    block, trash, archive or keep one thread (ID may be a
+                   prefix; block/trash/archive need --live)
+  undo EVENT       undo a block or an archive by its event number (from
+                   log); a trashed thread has no undo in Messages for web
   policy show      the rules in force (defaults, mode and config applied)
   policy test      replay the cached verdicts through the rules: what each
                    rule would do, without touching anything
@@ -72,7 +78,7 @@ To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
   'run', 'pair', 'scan', 'sweep', 'act-on-spam', 'check-pictures', 'diagnose', 'log', 'clear-log',
-  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest',
+  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo',
 ]);
 
 const { values: flags, positionals } = parseArgs({
@@ -203,6 +209,22 @@ function policyCommand(settings, store, sub) {
   for (const [k, n] of [...tally].sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${k}`);
 }
 
+// What the rules hold for a person: cached verdicts whose decision is
+// "hold", with the name the events table last saw for the thread.
+function review(settings, store, db) {
+  const policy = loadPolicy();
+  const { verdicts = {} } = store.get('verdicts');
+  const names = new Map(db.db.prepare('select thread_id, name from events where name is not null group by thread_id').all().map((r) => [r.thread_id, r.name]));
+  const held = Object.entries(verdicts)
+    .map(([id, v]) => [id, v, policy.decide(v, { isNew: true, settings: { ...settings, dryRun: false }, thread: { msgTime: v.msgTime, recent: false } })])
+    .filter(([, , d]) => d.hold);
+  if (!held.length) return console.log(`Nothing held for review (mode ${settings.mode}; the spam-review rule is on in full mode).`);
+  for (const [id, v, d] of held.sort((a, b) => (b[1].time ?? 0) - (a[1].time ?? 0))) {
+    console.log(`${id}  ${(names.get(id) ?? '?').padEnd(18)} ${v.label} ${Math.round((v.score ?? 0) * 100)}%  ${d.rule}: ${(v.reason ?? '').slice(0, 80)}`);
+  }
+  console.log(`\n${held.length} held. Decide one: messages-control act <id> block|trash|archive|keep [--live]`);
+}
+
 function serviceUnitPath() {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'systemd', 'user', 'messages-control.service');
 }
@@ -290,8 +312,8 @@ function runningPid() {
 }
 
 function printLog(db, limit) {
-  const rows = db.events({ limit }).map((r) => ({ ...r, time: r.time }));
-  for (const entry of rows) console.log(formatEntry(entry) + (entry.rule ? ` [${entry.rule}]` : ''));
+  const rows = db.events({ limit }).map((r) => ({ ...r }));
+  for (const entry of rows) console.log(`#${String(entry.id).padEnd(5)} ${formatEntry(entry)}${entry.rule ? ` [${entry.rule}]` : ''}`);
   if (!rows.length) console.log('(log is empty)');
 }
 
@@ -336,7 +358,7 @@ async function status(settings, store, db) {
 }
 
 async function main() {
-  if (flags.help || !COMMANDS.has(command)) {
+  if (flags.help || !COMMANDS.has(command) || (command === 'act' && !(positionals[1] && /^(block|trash|archive|keep)$/.test(positionals[2] ?? ''))) || (command === 'undo' && !/^#?\d+$/.test(positionals[1] ?? ''))) {
     console.log(USAGE);
     process.exit(flags.help ? 0 : 2);
   }
@@ -372,6 +394,7 @@ async function main() {
     return;
   }
   if (command === 'policy') return policyCommand(settings, store, positionals[1] ?? 'show');
+  if (command === 'review') return review(settings, store, db);
 
   const running = runningPid();
   if (running) {
@@ -498,8 +521,19 @@ async function main() {
   if (command === 'pair') return shutdown();
 
   await inject();
+  let undoMsg = null;
+  if (command === 'undo') {
+    const event = db.db.prepare('select * from events where id = ?').get(Number(String(positionals[1]).replace('#', '')));
+    if (!event) throw new Error(`no event #${positionals[1]} (see \`log\`)`);
+    const kind = /^blocked/.test(event.outcome ?? '') ? 'blocked' : /^archived/.test(event.outcome ?? '') ? 'archived' : null;
+    if (!kind) throw new Error(`event #${event.id} was "${event.outcome}": only blocks and archives can be undone (Messages for web has no trash view)`);
+    if (!event.name) throw new Error(`event #${event.id} has no sender name to look up`);
+    undoMsg = { type: 'undo', kind, name: event.name, threadId: event.thread_id };
+  }
   const oneOff = {
     diagnose: { type: 'diagnose' },
+    undo: undoMsg,
+    act: { type: 'act', id: positionals[1], action: positionals[2], live: flags.live },
     scan: { type: 'scanNow', includeSeen: flags['include-seen'] },
     sweep: { type: 'scanNow', processAll: true },
     'act-on-spam': { type: 'scanNow', trashSpam: true },
@@ -509,7 +543,13 @@ async function main() {
     if (!(await waitForRows())) console.warn('No conversation rows appeared; the inbox may be empty.');
     const res = await deliver(oneOff[command]);
     if (command === 'diagnose') console.log(JSON.stringify(res?.report ?? res, null, 2));
-    else console.log(res?.summary ?? res);
+    else if (command === 'act' || command === 'undo') {
+      if (!res?.ok) {
+        console.error(res?.error ?? 'no answer from the page');
+        return shutdown(EXIT_ERROR);
+      }
+      console.log(formatEntry(res.row));
+    } else console.log(res?.summary ?? res);
     return shutdown();
   }
 
