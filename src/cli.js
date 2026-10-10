@@ -196,7 +196,7 @@ WantedBy=default.target
   } else {
     console.log('Start it: systemctl --user daemon-reload && systemctl --user enable --now messages-control');
   }
-  console.log('To keep it running while logged out: loginctl enable-linger');
+  console.log('To keep it running while logged out: loginctl enable-linger (WSL: sudo loginctl enable-linger $USER)');
 }
 
 function uninstallService() {
