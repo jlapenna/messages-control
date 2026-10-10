@@ -591,12 +591,22 @@
   // archive, or keep (remembered as a verdict of "ok" so no rule fires
   // again). Destructive actions need live: true from the caller.
   async function act(msg) {
-    const find = () => listThreads().find((x) => x.id === msg.id || x.id.startsWith(msg.id));
-    let t = find();
-    if (!t) {
-      // Older threads aren't rendered until the list is loaded.
-      await loadAllThreads();
+    // An id prefix is accepted only when it names exactly one thread.
+    const find = () => {
+      const hits = listThreads().filter((x) => x.id === msg.id || x.id.startsWith(msg.id));
+      if (hits.length > 1 && !hits.some((x) => x.id === msg.id)) throw new Error(`${msg.id} matches ${hits.length} threads; give more of the id`);
+      return hits.find((x) => x.id === msg.id) ?? hits[0];
+    };
+    let t;
+    try {
       t = find();
+      if (!t) {
+        // Older threads aren't rendered until the list is loaded.
+        await loadAllThreads();
+        t = find();
+      }
+    } catch (err) {
+      return { ok: false, error: err.message };
     }
     if (!t) return { ok: false, error: `thread ${msg.id} is not in the conversation list` };
     if (msg.action === 'keep') {

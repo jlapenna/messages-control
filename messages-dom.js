@@ -526,17 +526,22 @@
     await waitFor(() => [...dialog.querySelectorAll('button')].some((b) => buttonRe.test(b.innerText.trim())), 8000);
     await sleep(500);
     const target = name.replace(/\s+/g, ' ').trim();
-    const button = [...dialog.querySelectorAll('button')].find((b) => {
+    // A row is the nearest ancestor of a button whose first line (the
+    // sender, an h2 on the real page) is exactly the name: not a substring,
+    // so "555-1234" can't pick "(415) 555-1234".
+    const rowName = (el) => (el.querySelector('h2, .conv-name') ?? el).innerText.split('\n')[0].replace(/\s+/g, ' ').trim();
+    const candidates = [...dialog.querySelectorAll('button')].filter((b) => {
       if (!buttonRe.test(b.innerText.trim())) return false;
-      // The row is the nearest ancestor that holds the name but not the whole list.
       for (let el = b.parentElement; el && el !== dialog; el = el.parentElement) {
-        const text = el.innerText.replace(/\s+/g, ' ');
-        if (text.includes(target)) return (text.match(/Unblock|Not spam|Unarchive/g) ?? []).length <= 1;
+        if (el.querySelectorAll('button').length > 1) return false; // past the row: the list
+        if (rowName(el) === target) return true;
       }
       return false;
     });
+    const button = candidates[0];
     try {
       if (!button) throw new Error(`${target} is not listed under "${view}"`);
+      if (candidates.length > 1) throw new Error(`${target} is listed ${candidates.length} times under "${view}"; undo it by hand`);
       const label = button.innerText.trim();
       realClick(button);
       await sleep(1500);
