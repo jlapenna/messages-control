@@ -1,6 +1,6 @@
 export const DEFAULT_PROMPT = `You classify SMS/RCS/MMS text message threads.
 Spam = scams, phishing, fake toll/package/delivery/DMV notices, political fundraising, crypto/job/loan/debt offers, "wrong number" or "hi, is this X?" openers from strangers, gambling, adult content, and promotions from senders that are not a real business.
-MARKETING = a promotion, sale, coupon, loyalty or newsletter text from a real, identifiable business, store, brand, app or service, typically with a STOP footer. Marketing is not spam: spam_probability low, marketing true. A promotion that is really a scam (prize, crypto, fake brand, link to an odd domain, pressure to act) is spam, marketing false.
+MARKETING = a promotion, sale, coupon, loyalty or newsletter text from a real, identifiable business, store, brand, app or service, typically with a STOP footer. Marketing is not spam: spam_probability low, marketing true. A promotion that is really a scam (prize, crypto, fake brand, link to an odd domain, pressure to act) is spam, marketing false. Alerts and notices from a utility, bank, carrier, insurer, pharmacy or government agency are not marketing even when they carry tips or a STOP footer: marketing false.
 Political campaign texts, donation asks and get-out-the-vote blasts are spam, whatever the party and even if the candidate is real.
 NOT spam = personal messages, 2FA/verification codes, appointment and pharmacy reminders, bank/carrier/utility alerts, real delivery updates without suspicious links, group chats with friends.
 Pictures may be attached: judge what they show. Flyers, ads, promos, prize/crypto/political images, fake invoices and QR codes from an unknown sender are spam. If a picture message arrives without the picture, say so in the reason and stay near 0.5.
@@ -12,6 +12,16 @@ Reply with JSON only: {"spam_probability": 0-1, "marketing": true|false, "otp": 
 // Defaults that earlier versions saved verbatim from the settings page; a
 // stored copy of one of these means "use the current default".
 const PREVIOUS_DEFAULT_PROMPTS = [
+  `You classify SMS/RCS/MMS text message threads.
+Spam = scams, phishing, fake toll/package/delivery/DMV notices, political fundraising, crypto/job/loan/debt offers, "wrong number" or "hi, is this X?" openers from strangers, gambling, adult content, and promotions from senders that are not a real business.
+MARKETING = a promotion, sale, coupon, loyalty or newsletter text from a real, identifiable business, store, brand, app or service, typically with a STOP footer. Marketing is not spam: spam_probability low, marketing true. A promotion that is really a scam (prize, crypto, fake brand, link to an odd domain, pressure to act) is spam, marketing false.
+Political campaign texts, donation asks and get-out-the-vote blasts are spam, whatever the party and even if the candidate is real.
+NOT spam = personal messages, 2FA/verification codes, appointment and pharmacy reminders, bank/carrier/utility alerts, real delivery updates without suspicious links, group chats with friends.
+Pictures may be attached: judge what they show. Flyers, ads, promos, prize/crypto/political images, fake invoices and QR codes from an unknown sender are spam. If a picture message arrives without the picture, say so in the reason and stay near 0.5.
+OTP = a genuine one-time passcode, verification or login code from a real service, typically just the code plus a "don't share it" warning. A message that pairs a code with a link, prize, payment, or pressure to act is phishing: high spam_probability, otp false.
+NOTIFICATION = an automated, legitimate status notice whose usefulness ends within about a day: food or order ready for pickup, out for delivery or delivered, driver or ride arriving, table ready, service or repair finished, charging or parking session ended. Only notice-only messages count: nothing to read, keep or act on later. Not notifications: event invitations and updates (Partiful, Evite, Paperless Post, host announcements), bills or payments due, appointments or reminders for a future date, fraud or account-security alerts, anything a person wrote. A notification is not spam; one-time codes are OTP, not notifications.
+spam_probability is how likely the thread is spam, from 0 (certainly not) to 1 (certainly spam). When unsure, stay below 0.5.
+Reply with JSON only: {"spam_probability": 0-1, "marketing": true|false, "otp": true|false, "notification": true|false, "reason": "short"}`,
   `You classify SMS/RCS/MMS text message threads.
 Spam = unsolicited marketing, scams, phishing, fake toll/package/delivery/DMV notices, political fundraising, crypto/job/loan/debt offers, "wrong number" or "hi, is this X?" openers from strangers, gambling, adult content.
 Political campaign texts, donation asks and get-out-the-vote blasts are spam, whatever the party and even if the candidate is real.
