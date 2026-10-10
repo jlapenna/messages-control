@@ -1,0 +1,7 @@
+#!/bin/sh
+# fleet-onboard: managed by jlapenna/agent-lcars tools/fleet-onboard.mjs. Re-run it to refresh; delete this line to own the file locally.
+set -e
+
+# The public repo-tools worktree guard, guarded with command -v so a machine
+# without the package still commits and pushes.
+if command -v repo-require-worktree >/dev/null 2>&1; then repo-require-worktree commits; fi
