@@ -1,0 +1,18 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: for f in *.js src/*.js bin/*.js; do node --check "$f"; done
+      - run: node -e 'JSON.parse(require("fs").readFileSync("manifest.json"))'
+      - run: npm test
