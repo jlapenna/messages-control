@@ -23,8 +23,22 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, db, store,
 
   const send = (res, status, body, type = 'application/json') => {
     const data = typeof body === 'string' ? body : JSON.stringify(body);
-    res.writeHead(status, { 'Content-Type': `${type}; charset=utf-8`, 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(data) });
+    res.writeHead(status, {
+      'Content-Type': `${type}; charset=utf-8`,
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(data),
+      'X-Content-Type-Options': 'nosniff',
+      ...(type === 'text/html' ? { 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self'" } : {}),
+    });
     res.end(data);
+  };
+
+  // Only the loopback names reach this server legitimately; a browser sent
+  // here by DNS rebinding carries the attacker's Host and is refused.
+  const hosts = new Set([bind, '127.0.0.1', 'localhost', '[::1]']);
+  const hostOk = (req) => {
+    const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+    return hosts.has(host);
   };
 
   const authorized = (req) => {
@@ -50,6 +64,7 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, db, store,
     });
 
   async function handle(req, res) {
+    if (!hostOk(req)) return send(res, 421, { error: 'unexpected Host' });
     const url = new URL(req.url, 'http://localhost');
     if (req.method === 'GET' && url.pathname === '/healthz') {
       const h = await health();
