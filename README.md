@@ -87,6 +87,36 @@ overrides the defaults in `settings.js`:
 | `notifyCommand` | | shell command run on every action and failure, with `MC_EVENT` and `MC_MESSAGE` set |
 | `prompt` | see `settings.js` | the classifier instructions |
 
+## Policies
+
+What happens to a thread is decided by rules in `policy.js`, tried in
+order; the first whose `match` fits the verdict wins. The defaults are:
+
+| Rule | Match | Action | Modes |
+| --- | --- | --- | --- |
+| `spam-block` | label spam, score ≥ `threshold` | `spamAction` (block & report, or trash) | spam, full |
+| `marketing-delete` | label marketing | trash | spam, full |
+| `otp-archive` | label otp, flagged by the model | archive after 6 h | full |
+| `notice-archive` | label notice | archive after 24 h | full |
+
+`messages-control policy show` prints the rules in force;
+`messages-control policy test` replays every cached verdict through them
+and tallies what each rule would do, touching nothing. A `"policies"` list
+in the config replaces the defaults, e.g. to keep political texts instead
+of blocking them:
+
+```json
+"policies": [
+  { "name": "spam-trash", "match": { "label": ["spam"], "minScore": 0.9 }, "action": "trash" },
+  { "name": "marketing-keep", "match": { "label": ["marketing"] }, "action": "keep" }
+]
+```
+
+Fields: `match.label` (list), `match.minScore` (number or `"threshold"`),
+`match.byModel`, `action` (`block_report`, `trash`, `archive_after` with
+`hours`, `keep`, or `spamAction`), `modes`, `enabled`. Threads from saved
+contacts never reach the rules.
+
 ## Running as a service
 
 ```sh
@@ -125,8 +155,9 @@ DOM driver: `messages-control diagnose` and `--headed`.
 
 - `messages-dom.js`: Google Messages DOM driver (list, read, delete, block,
   archive, diagnose). No `chrome.*` APIs.
-- `content.js`: new-thread detection and the classify → act policy. Uses
+- `content.js`: new-thread detection and the classify → act flow. Uses
   `chrome.runtime.sendMessage` and `chrome.storage.local`.
+- `policy.js`: the rules (above); plain script shared by the page and Node.
 - `src/page-shim.js`: the slice of `chrome.*` those two use, backed by Node;
   `src/cli.js` injects shim + driver + content.js into the page.
 - `src/backend.js`: the LLM call and the log. `src/store.js`:

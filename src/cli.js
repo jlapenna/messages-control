@@ -4,6 +4,7 @@ import os from 'node:os';
 import readline from 'node:readline/promises';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { parseArgs } from 'node:util';
 import { CONFIG_FILE, STATE_DIR, loadSettings, readConfig, writeConfig } from './config.js';
 import { Store } from './store.js';
@@ -13,7 +14,7 @@ import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, 
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The extension's page-side code, unchanged, behind a chrome.* shim.
-const PAGE_SCRIPTS = ['src/page-shim.js', 'messages-dom.js', 'content.js'].map((f) =>
+const PAGE_SCRIPTS = ['src/page-shim.js', 'messages-dom.js', 'policy.js', 'content.js'].map((f) =>
   fs.readFileSync(path.join(root, f), 'utf8'),
 );
 
@@ -43,6 +44,9 @@ Commands (default: run)
   test-classifier  send sample texts to the LLM and print the verdicts
   install-service  write a systemd user unit; --enable starts it now
   uninstall-service
+  policy show      the rules in force (defaults, mode and config applied)
+  policy test      replay the cached verdicts through the rules: what each
+                   rule would do, without touching anything
 
 Options
   --headed         show the browser window
@@ -61,7 +65,7 @@ To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
   'run', 'pair', 'scan', 'sweep', 'act-on-spam', 'check-pictures', 'diagnose', 'log', 'clear-log',
-  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service',
+  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy',
 ]);
 
 const { values: flags, positionals } = parseArgs({
@@ -161,6 +165,40 @@ async function testClassifier(settings) {
     const v = await backend.classify(thread);
     console.log(`${v.spam ? 'spam' : v.marketing ? 'marketing' : 'ok'} (${Math.round(v.score * 100)}%) · ${v.reason}`);
   }
+}
+
+// policy.js is a plain script (it also runs in the page): load it the way
+// the page does and take the global it sets.
+function loadPolicy() {
+  vm.runInThisContext(fs.readFileSync(path.join(root, 'policy.js'), 'utf8'), { filename: 'policy.js' });
+  return globalThis.MessagesPolicy;
+}
+
+function policyCommand(settings, store, sub) {
+  const policy = loadPolicy();
+  const inForce = policy.rules(settings);
+  if (sub === 'show') {
+    console.log(`mode ${settings.mode}, ${settings.dryRun ? 'dry run' : 'live'}, threshold ${settings.threshold}, spamAction ${settings.spamAction}`);
+    for (const r of inForce) console.log(`  ${r.name}: ${JSON.stringify(r.match)} → ${r.action}${r.hours ? ` ${r.hours}h` : ''}`);
+    console.log(settings.policies?.length ? '(from "policies" in the config)' : '(defaults; set "policies" in the config to replace them)');
+    return;
+  }
+  if (sub !== 'test') throw new Error(`policy ${sub}? (show or test)`);
+  // Replay: every cached verdict, as if its thread had just arrived (isNew)
+  // and as it stands (existing), against the live rules, dry run off.
+  const { verdicts = {} } = store.get('verdicts');
+  const live = { ...settings, dryRun: false };
+  const tally = new Map();
+  const bump = (k) => tally.set(k, (tally.get(k) ?? 0) + 1);
+  for (const v of Object.values(verdicts)) {
+    const thread = { msgTime: v.msgTime, recent: false };
+    const asNew = policy.decide(v, { isNew: true, settings: live, thread });
+    const asOld = policy.decide(v, { isNew: false, settings: live, thread });
+    bump(`${v.label.padEnd(9)} new → ${asNew.rule ?? '-'}: ${asNew.outcome.replace(/…$/, '')}`);
+    if (asOld.archive || asOld.outcome !== asNew.outcome) bump(`${v.label.padEnd(9)} old → ${asOld.rule ?? '-'}: ${asOld.outcome}`);
+  }
+  console.log(`${Object.keys(verdicts).length} cached verdicts through ${inForce.length} rules (mode ${settings.mode}):`);
+  for (const [k, n] of [...tally].sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${k}`);
 }
 
 function serviceUnitPath() {
@@ -291,6 +329,7 @@ async function main() {
     return console.log('Log cleared.');
   }
   if (command === 'status') return status(settings, store);
+  if (command === 'policy') return policyCommand(settings, store, positionals[1] ?? 'show');
 
   const running = runningPid();
   if (running) {
