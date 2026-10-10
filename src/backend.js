@@ -40,6 +40,8 @@ export class Backend {
     // down, not one bad message.
     this.onFatal = onFatal;
     this.failures = 0;
+    // For /metrics: classifier calls since the process started.
+    this.stats = { calls: 0, failures: 0, ms: 0 };
     // Log writes are read-modify-write, so run them one at a time.
     this.logQueue = Promise.resolve();
   }
@@ -51,11 +53,16 @@ export class Backend {
           return { ok: true, settings: this.settings };
         case 'classify': {
           let verdict;
+          const t0 = Date.now();
+          this.stats.calls++;
           try {
             verdict = await this.classify(msg.thread);
           } catch (err) {
+            this.stats.failures++;
             if (++this.failures >= FAILURE_LIMIT) this.onFatal(`LLM endpoint failing: ${err.message}`);
             throw err;
+          } finally {
+            this.stats.ms += Date.now() - t0;
           }
           this.failures = 0;
           return { ok: true, verdict };

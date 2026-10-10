@@ -11,6 +11,8 @@ import { Store } from './store.js';
 import { Db } from './db.js';
 import { notify as sendNotification } from './notify.js';
 import { digestText, parseSince } from './digest.js';
+import { startApi } from './api.js';
+import { randomBytes } from 'node:crypto';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
 import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, waitForState } from './pair.js';
@@ -71,6 +73,8 @@ Options
 
 Config: ${CONFIG_FILE} (keys as in settings.js; the API key lives there,
 owner-only) or MESSAGES_CONTROL_API_KEY in the environment.
+While running, http://127.0.0.1:7373/ serves /healthz and /metrics
+(Prometheus) openly and the dashboard + /api/* behind api.token.
 "notify" in the config: { "telegram": { "token", "chatId" }, "command": "...",
 "events": [...] } — actions, pairing approvals, failures and digests go there.
 Exit codes: ${EXIT_UNPAIRED} = not paired (run pair --headed), ${EXIT_LLM} = LLM endpoint failing.
@@ -333,6 +337,7 @@ async function status(settings, store, db) {
     }
   }
   console.log(`service:   ${service}`);
+  if (settings.api?.port > 0) console.log(`api:       http://${settings.api.bind}:${settings.api.port}/ (healthz, metrics, dashboard; token ${settings.api.token ? 'in the config' : 'is generated on the first run'})`);
   console.log(`baseline:  ${baselined ? 'done (existing threads marked as not new)' : 'not yet (the first run does it)'}`);
   console.log(`last scan: ${lastScan ? `${stamp(lastScan.time)} — ${lastScan.summary}` : 'never'}`);
   console.log(
@@ -404,9 +409,11 @@ async function main() {
   }
 
   const { context, page } = await launchBrowser({ profileDir: path.join(stateDir, 'profile'), headed: flags.headed });
+  let apiServer = null;
   const shutdown = async (code = 0) => {
     if (exiting) return;
     exiting = true;
+    apiServer?.close();
     store.flush();
     db.close();
     if (command === 'run') fs.rmSync(PID_FILE, { force: true });
@@ -556,6 +563,26 @@ async function main() {
   // run: content.js does the watching. After a reload the page starts over
   // without it, and the phone can unpair us; both are mended here.
   fs.writeFileSync(PID_FILE, String(process.pid));
+  // The local API: healthz and metrics for monitoring, the dashboard at /.
+  const apiConf = { ...settings.api };
+  if (apiConf.port > 0) {
+    if (!apiConf.token) {
+      apiConf.token = randomBytes(24).toString('base64url');
+      const config = readConfig();
+      writeConfig({ ...config, api: { ...(config.api ?? {}), token: apiConf.token } });
+      console.log(`API token written to ${CONFIG_FILE} (api.token).`);
+    }
+    const health = async () => {
+      const alive = await Promise.race([page.evaluate(() => 1).then(() => true), new Promise((r) => setTimeout(() => r(false), 10000))]).catch(() => false);
+      const paired = alive ? (await pairingState(page).catch(() => null)) === 'paired' : false;
+      return { ok: alive && paired, alive, paired, pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) };
+    };
+    try {
+      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, db, store, backend, health, deliver, policy: loadPolicy() });
+    } catch (err) {
+      console.warn(`API not started (${err.message}); healthz and the dashboard are off.`);
+    }
+  }
   console.log(`Watching Messages (mode ${settings.mode}, ${settings.dryRun ? 'dry run' : 'LIVE'}; spam → ${settings.spamAction}, marketing → trash).`);
   let mending = false;
   async function mend() {

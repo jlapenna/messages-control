@@ -41,3 +41,14 @@ test('a corrupt file is an error, not silent data loss', () => {
   fs.writeFileSync(file, '{not json');
   assert.throws(() => new Store(file), /state\.json/);
 });
+
+test('nested settings merge key by key', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-cfg-'));
+  process.env.MESSAGES_CONTROL_CONFIG = path.join(dir, 'config.json');
+  fs.writeFileSync(process.env.MESSAGES_CONTROL_CONFIG, JSON.stringify({ api: { token: 'abc' } }));
+  // CONFIG_FILE is read when the module loads, so import it fresh.
+  const { loadSettings } = await import(`../src/config.js?${Date.now()}`);
+  const s = loadSettings();
+  assert.equal(s.api.token, 'abc');
+  assert.equal(s.api.port, 7373);
+});

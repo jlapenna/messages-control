@@ -147,6 +147,39 @@ table: counts, each action with the model's reason, what dry run held,
 errors. `install-service --digest 08:00` adds a systemd timer that sends it
 daily.
 
+## API, dashboard and monitoring
+
+While `run` is active it serves `http://127.0.0.1:7373/` (`api.bind`,
+`api.port` in the config; port 0 turns it off):
+
+- `/healthz` — 200 when paired and the page answers, 503 otherwise. No token.
+- `/metrics` — Prometheus text, no token: `messages_control_healthy`,
+  `messages_control_paired`, `messages_control_dry_run`,
+  `messages_control_last_scan_timestamp_seconds`,
+  `messages_control_events_total{outcome=…}`,
+  `messages_control_verdicts{label=…}`, `messages_control_llm_calls_total`,
+  `messages_control_llm_failures_total`, `messages_control_llm_seconds_total`,
+  `process_start_time_seconds`.
+- `/` — the dashboard: health, the last 24 hours, the review queue with
+  keep/archive/block/trash buttons, recent activity with undo, the rules in
+  force, a "Scan now" button.
+- `/api/status`, `/api/events?since&limit`, `/api/review`, `/api/policies`,
+  `/api/verdicts`; `POST /api/act {id, action}`, `POST /api/undo {event}`,
+  `POST /api/scan {includeSeen, checkPictures, trashSpam, processAll}` —
+  all behind `Authorization: Bearer <api.token>`. The token is generated on
+  the first run and written to the config; the dashboard asks for it once.
+
+Prometheus scrape config:
+
+```yaml
+- job_name: messages-control
+  static_configs:
+    - targets: ['127.0.0.1:7373']
+```
+
+Alert on `messages_control_healthy == 0` (or the target going down) and on
+`increase(messages_control_llm_failures_total[1h]) > 5`.
+
 ## Running as a service
 
 ```sh

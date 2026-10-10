@@ -117,6 +117,10 @@ export const DEFAULTS = {
   // Standalone only: reload the page this often (between scans) so a pairing
   // revoked from the phone is noticed.
   reloadMinutes: 20,
+  // Standalone only: the watcher's local API and dashboard (healthz and
+  // metrics for monitoring). port 0 turns it off; the token is generated on
+  // the first run and written to the config.
+  api: { bind: '127.0.0.1', port: 7373, token: '' },
   prompt: DEFAULT_PROMPT,
 };
 
