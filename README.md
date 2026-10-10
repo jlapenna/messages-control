@@ -14,7 +14,9 @@ classified by an LLM you point it at (any OpenAI-compatible endpoint), and:
   summary, date, amount, confirmation or tracking number.
 
 Threads from saved contacts are never touched. It starts in **dry run**:
-everything is logged, nothing is acted on, until you pass `--live`.
+spam and marketing are logged, not blocked or trashed, until you pass
+`--live`. Dry run does not hold back `full` mode's archiving of old codes and
+notices, and opening a picture thread marks it read either way.
 
 Two modes. `spam` (the default) does only the above, on new threads. `full`
 also labels your history and archives one-time codes after 6 hours and
@@ -82,7 +84,7 @@ overrides the defaults in `settings.js`:
 | `model` | `gpt-4o-mini` | needs JSON output; pictures need a vision model |
 | `apiKey` | | or `MESSAGES_CONTROL_API_KEY` in the environment |
 | `mode` | `spam` | `spam` or `full` |
-| `dryRun` | `true` | `--live` sets it false for that run |
+| `dryRun` | `true` | `--live` sets it false for that run; holds blocks and trashing only, not `full` mode's archiving |
 | `spamAction` | `block` | `block` (block & report) or `trash` |
 | `threshold` | `0.8` | spam probability needed to act |
 | `skipNamedContacts` | `true` | never touch threads whose name has no digits |
@@ -241,15 +243,18 @@ characters of each checked thread.
 
 ## Development
 
-`npm test` runs the unit tests (classifier parsing, policies, store, event
-log, notifications, digest, API). `npm run test:integration` runs the real
-CLI, a headless Chromium and the page driver against a mock Messages page
+`npm test` (`node --test`, no install needed) runs the unit tests: the
+policy rules, classifier parsing and failure handling, the store, the event
+log, notifications, the digest and the local API. `npm run test:integration`
+(after `npm ci` and `npx playwright install chromium`) runs the real CLI, a
+headless Chromium and the page driver against a mock Messages page
 (`test/integration/mock/`: the same elements and attributes the driver
 relies on, a keyword classifier, and a record of every action the page
 took), end to end: scan, block, STOP + trash, undo, keep, status. CI runs
 both in the required `test` check. The real page remains the test bed for
-selector changes: `messages-control diagnose` and `--headed`; run the mock
-by hand with `node test/integration/mock/server.mjs 7474` and
+selector changes and the `content.js` flow in Google's own DOM:
+`messages-control diagnose` and `--headed`; run the mock by hand with
+`node test/integration/mock/server.mjs 7474` and
 `MESSAGES_CONTROL_MESSAGES_URL=http://127.0.0.1:7474/web/`.
 
 - `messages-dom.js`: Google Messages DOM driver (list, read, delete, block,
@@ -263,6 +268,10 @@ by hand with `node test/integration/mock/server.mjs 7474` and
   `chrome.storage.local` on a JSON file. `src/pair.js`: pairing.
   `src/browser.js`: the persistent Chromium profile. `src/config.js`: modes
   and the config file.
+- `src/db.js`: the SQLite events and verdicts tables. `src/notify.js`:
+  Telegram and command notifications. `src/digest.js`: the digest text.
+  `src/api.js` and `src/dashboard.html`: the local API, `/healthz`,
+  `/metrics` and the dashboard.
 - `background.js`, `panel.*`, `options.*`, `settings.js`: the same code as a
   Chrome extension (load unpacked in a Chrome that is already paired).
   `settings.js` holds the defaults for both.
