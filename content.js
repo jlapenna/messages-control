@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -239,9 +239,20 @@
     // Spam is blocked & reported or trashed, per settings (read fresh);
     // marketing is always trashed.
     const block = !archive && !trash && now.spamAction === 'block';
+    // Opt-in: tell a marketing sender to stop before the thread goes. A
+    // failed reply is noted and never blocks the trash.
+    let replied = '';
+    if (trash && v.label === 'marketing' && now.unsubscribeMarketing) {
+      try {
+        await sendText(t.id, now.unsubscribeText || 'STOP');
+        replied = `, replied ${now.unsubscribeText || 'STOP'}`;
+      } catch (err) {
+        replied = ` (reply failed: ${err.message})`;
+      }
+    }
     try {
       const method = archive ? await archiveThread(t.id) : block ? await blockThread(t.id) : await deleteThread(t.id);
-      const done = archive ? outcome.replace('archiving', 'archived') : block ? 'blocked & reported' : 'deleted';
+      const done = (archive ? outcome.replace('archiving', 'archived') : block ? 'blocked & reported' : 'deleted') + replied;
       return { row: { ...fromVerdict(t, v, done, rule), method }, done: true };
     } catch (err) {
       const what = archive ? 'archive' : block ? 'block & report' : 'delete';
@@ -594,25 +605,30 @@
   // An explicit action on one thread (the review queue): block, trash,
   // archive, or keep (remembered as a verdict of "ok" so no rule fires
   // again). Destructive actions need live: true from the caller.
-  async function act(msg) {
-    // An id prefix is accepted only when it names exactly one thread.
+  // A thread by id (a prefix is accepted when it names exactly one), loading
+  // the whole list if it isn't rendered yet. Throws when not found.
+  async function threadById(id) {
     const find = () => {
-      const hits = listThreads().filter((x) => x.id === msg.id || x.id.startsWith(msg.id));
-      if (hits.length > 1 && !hits.some((x) => x.id === msg.id)) throw new Error(`${msg.id} matches ${hits.length} threads; give more of the id`);
-      return hits.find((x) => x.id === msg.id) ?? hits[0];
+      const hits = listThreads().filter((x) => x.id === id || x.id.startsWith(id));
+      if (hits.length > 1 && !hits.some((x) => x.id === id)) throw new Error(`${id} matches ${hits.length} threads; give more of the id`);
+      return hits.find((x) => x.id === id) ?? hits[0];
     };
+    let t = find();
+    if (!t) {
+      await loadAllThreads();
+      t = find();
+    }
+    if (!t) throw new Error(`thread ${id} is not in the conversation list`);
+    return t;
+  }
+
+  async function act(msg) {
     let t;
     try {
-      t = find();
-      if (!t) {
-        // Older threads aren't rendered until the list is loaded.
-        await loadAllThreads();
-        t = find();
-      }
+      t = await threadById(msg.id);
     } catch (err) {
       return { ok: false, error: err.message };
     }
-    if (!t) return { ok: false, error: `thread ${msg.id} is not in the conversation list` };
     if (msg.action === 'keep') {
       await rememberVerdict(t.id, { label: 'ok', byModel: true, score: 0, reason: 'kept by you', text: t.text, msgTime: t.msgTime, time: Date.now(), version: VERDICT_VERSION });
       await markSeen([t.id]);
@@ -659,7 +675,21 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg.type === 'undo') {
+    if (msg.type === 'send') {
+      (async () => {
+        if (!msg.live) return { ok: false, error: 'sending needs --live' };
+        try {
+          const t = await threadById(msg.id);
+          await sendText(t.id, msg.text);
+          const r = row(t, { label: 'sent', outcome: `sent "${msg.text.slice(0, 40)}"`, rule: 'send' });
+          await log(r);
+          return { ok: true, row: r };
+        } catch (err) {
+          return { ok: false, error: err.message };
+        }
+      })().then(sendResponse);
+      return true;
+    } else if (msg.type === 'undo') {
       undo(msg).then(sendResponse);
       return true;
     } else if (msg.type === 'diagnose') {
