@@ -12,15 +12,32 @@ export const STATE_DIR =
   process.env.MESSAGES_CONTROL_STATE ??
   path.join(process.env.XDG_STATE_HOME ?? path.join(home, '.local', 'state'), 'messages-control');
 
-// The extension's defaults, then the config file, then LITELLM_API_KEY from
-// the environment, then command-line overrides.
-export function loadSettings(overrides = {}) {
-  let file = {};
+export function readConfig() {
   try {
-    file = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
   } catch (err) {
     if (err.code !== 'ENOENT') throw new Error(`${CONFIG_FILE}: ${err.message}`);
+    return {};
   }
-  const env = process.env.LITELLM_API_KEY ? { apiKey: process.env.LITELLM_API_KEY } : {};
-  return { ...DEFAULTS, ...file, ...env, ...overrides };
+}
+
+export function writeConfig(config) {
+  fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+}
+
+// Spam mode touches nothing but new threads: no labels on the history, no
+// archiving of old codes and notices.
+const MODES = {
+  spam: { labelExisting: false, archiveOldNotices: false },
+  full: {},
+};
+
+// The extension's defaults, then the config file, then the API key from the
+// environment, then command-line overrides, then what the mode forces.
+export function loadSettings(overrides = {}) {
+  const env = process.env.MESSAGES_CONTROL_API_KEY ? { apiKey: process.env.MESSAGES_CONTROL_API_KEY } : {};
+  const s = { ...DEFAULTS, ...readConfig(), ...env, ...overrides };
+  if (!MODES[s.mode]) throw new Error(`unknown mode "${s.mode}" (spam or full)`);
+  return { ...s, ...MODES[s.mode] };
 }

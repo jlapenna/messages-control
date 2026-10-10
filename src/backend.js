@@ -2,6 +2,7 @@
 // (settings, classify, log). Pictures the page couldn't read are fetched with
 // the browser's cookies and downscaled inside the page.
 const LOG_LIMIT = 300;
+const FAILURE_LIMIT = 5;
 // Backstop for the model: a code-ish word near a 4-8 digit number.
 const OTP_RE = /\b(code|passcode|otp|one[- ]time|verification|verify|2fa|login|sign[- ]in)\b[\s\S]{0,60}\b\d{4,8}\b|\b\d{4,8}\b[\s\S]{0,60}\b(code|passcode|otp|verification)\b/i;
 
@@ -29,12 +30,16 @@ function isPictureHost(src) {
 }
 
 export class Backend {
-  constructor({ store, settings, context = null, page = null, onLog = () => {} }) {
+  constructor({ store, settings, context = null, page = null, onLog = () => {}, onFatal = () => {} }) {
     this.store = store;
     this.settings = settings;
     this.context = context;
     this.page = page;
     this.onLog = onLog;
+    // Consecutive classify failures; a run of them means the endpoint is
+    // down, not one bad message.
+    this.onFatal = onFatal;
+    this.failures = 0;
     // Log writes are read-modify-write, so run them one at a time.
     this.logQueue = Promise.resolve();
   }
@@ -44,8 +49,17 @@ export class Backend {
       switch (msg.type) {
         case 'getSettings':
           return { ok: true, settings: this.settings };
-        case 'classify':
-          return { ok: true, verdict: await this.classify(msg.thread) };
+        case 'classify': {
+          let verdict;
+          try {
+            verdict = await this.classify(msg.thread);
+          } catch (err) {
+            if (++this.failures >= FAILURE_LIMIT) this.onFatal(`LLM endpoint failing: ${err.message}`);
+            throw err;
+          }
+          this.failures = 0;
+          return { ok: true, verdict };
+        }
         case 'log':
           await this.appendLog(msg.entry);
           return { ok: true };
@@ -161,6 +175,7 @@ export class Backend {
       // The regex is only a labelling backstop; cleanup acts on the model's own
       // flag, since a person's "gate code is 4821" can match the regex.
       otpByModel: !rawSpam && verdict.otp === true,
+      marketing: !rawSpam && verdict.marketing === true,
       notification: !rawSpam && verdict.notification === true,
       spam: rawSpam && score >= s.threshold,
       rawSpam,

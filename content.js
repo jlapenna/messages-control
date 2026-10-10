@@ -75,16 +75,18 @@
 
   // Bump when classification changes enough that old verdicts should be redone
   // (2: spam_probability scoring and picture checks; 3: notifications;
-  // 4: byModel, so codes can be archived).
-  const VERDICT_VERSION = 4;
+  // 4: byModel, so codes can be archived; 5: marketing).
+  const VERDICT_VERSION = 5;
   // A verdict is reused only for the same preview text and the same latest
   // message: picture threads all say "Picture", so a newer message (by list
   // timestamp, 5 minutes' slack for "34 min" drifting) invalidates it.
   const STALE_SLACK_MS = 5 * 60000;
-  // Version 4 only changed one-time codes (byModel), so spam, notice and ok
-  // verdicts from version 3 still hold; throwing them away cost the history
-  // its labels.
-  const versionOk = (v) => v.version === VERDICT_VERSION || (v.version === 3 && v.label !== 'otp');
+  // Version 5 only split marketing out of "ok", so spam, otp and notice
+  // verdicts from 3 and 4 still hold (4 only changed one-time codes, so otp
+  // needs 4+); throwing them away cost the history its labels.
+  const versionOk = (v) =>
+    v.version === VERDICT_VERSION ||
+    (v.label !== 'ok' && (v.version === 4 || (v.version === 3 && v.label !== 'otp')));
   const cached = (verdicts, t) => {
     const v = verdicts[t.id];
     if (!v || v.text !== t.text || !versionOk(v)) return null;
@@ -94,6 +96,7 @@
 
   function badge(id, v) {
     if (v.label === 'spam') markThread(id, `Spam ${pct(v.score)}`, v.reason);
+    else if (v.label === 'marketing') markThread(id, 'Marketing', v.reason, '#7b1fa2');
     else if (v.label === 'otp') markThread(id, 'OTP', v.reason, '#0b57d0');
     else if (v.label === 'notice') markThread(id, 'Notice', v.reason, '#5f6368');
   }
@@ -126,13 +129,15 @@
       // order notice is a notice (24 h), not a one-time code (6 h).
       label: verdict.rawSpam
         ? 'spam'
-        : verdict.otpByModel
-          ? 'otp'
-          : verdict.notification
-            ? 'notice'
-            : verdict.otp
-              ? 'otp'
-              : 'ok',
+        : verdict.marketing
+          ? 'marketing'
+          : verdict.otpByModel
+            ? 'otp'
+            : verdict.notification
+              ? 'notice'
+              : verdict.otp
+                ? 'otp'
+                : 'ok',
       byModel: verdict.rawSpam || verdict.notification || verdict.otpByModel,
       score: verdict.score,
       reason: verdict.reason,
@@ -190,13 +195,16 @@
     return { outcome: `archiving (${kind}, at least ${fmtHours(age)})`, archive: true };
   }
 
+  // Marketing is not spam: a promotion from a business is deleted (trash),
+  // never blocked and reported, so a store you buy from is never reported
+  // to Google. Spam goes by spamAction (block & report, or trash).
   function decide(v, { isNew, settings, thread }) {
     if (v.label === 'otp' || v.label === 'notice') return decideExpiring(v, thread, settings);
     if (v.label === 'ok') return { outcome: 'kept' };
-    if (v.score < settings.threshold) return { outcome: `kept: below ${pct(settings.threshold)} threshold` };
+    if (v.label === 'spam' && v.score < settings.threshold) return { outcome: `kept: below ${pct(settings.threshold)} threshold` };
     if (!isNew) return { outcome: 'not deleted: existing thread' };
     if (settings.dryRun) return { outcome: 'not deleted: dry run' };
-    return { outcome: 'deleting…', del: true };
+    return { outcome: 'deleting…', del: true, trash: v.label === 'marketing' };
   }
 
 
@@ -234,7 +242,7 @@
         return { row: row(t, { label: 'error', outcome, reason: err.message }), done };
       }
     }
-    const { outcome, del, archive } = decide(v, { isNew, settings, thread: t });
+    const { outcome, del, archive, trash } = decide(v, { isNew, settings, thread: t });
     if (!del && !archive) return { row: fromVerdict(t, v, outcome), done: true };
 
     // Right before the trash, check again everything the decision rested on.
@@ -258,13 +266,14 @@
       return { row: fromVerdict(t, v, `${not}: thread changed since it was checked`), done: false };
     }
     try {
-      // Spam is blocked & reported or trashed, per settings (read fresh).
-      const block = !archive && now.spamAction === 'block';
+      // Spam is blocked & reported or trashed, per settings (read fresh);
+      // marketing is always trashed.
+      const block = !archive && !trash && now.spamAction === 'block';
       const method = archive ? await archiveThread(t.id) : block ? await blockThread(t.id) : await deleteThread(t.id);
       const done = archive ? outcome.replace('archiving', 'archived') : block ? 'blocked & reported' : 'deleted';
       return { row: { ...fromVerdict(t, v, done), method }, done: true };
     } catch (err) {
-      const what = archive ? 'archive' : now.spamAction === 'block' ? 'block & report' : 'delete';
+      const what = archive ? 'archive' : block ? 'block & report' : 'delete';
       return { row: fromVerdict(t, v, `${what} failed: ${err.message}`), done: true };
     }
   }
@@ -391,9 +400,13 @@
           (attempts.get(t.id) ?? 0) < MAX_ATTEMPTS,
       );
       // "Check pictures now" handles every pending picture thread, not a batch.
+      // labelExisting off (spam mode): new threads only, so the history is
+      // never classified, opened or read-receipted on the user's behalf.
       const batch = checkPictures
         ? [...unlabelled.filter(needsOpen), ...unlabelled.filter((t) => !needsOpen(t)).slice(0, LABEL_BATCH)]
-        : unlabelled.slice(0, LABEL_BATCH);
+        : settings.labelExisting === false
+          ? []
+          : unlabelled.slice(0, LABEL_BATCH);
       if (processAll) {
         // Classify the whole backlog four at a time. Only the LLM calls run in
         // parallel; archiving and trashing (page actions) happen one by one

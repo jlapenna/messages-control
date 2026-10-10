@@ -61,6 +61,14 @@ async function rememberComputer(page) {
   });
 }
 
+// Headed: a person is at the window, so they sign in with the Google account
+// the phone uses (or scan the QR themselves); this just waits for the list.
+export async function waitForPairing(page, { out = console.log } = {}) {
+  out('In the browser window: Sign in with the Google account the phone uses, and approve on the phone if it asks.');
+  out(`(Or scan the QR at ${AUTH_URL} from Messages on the phone, if it still has a QR scanner.)`);
+  while ((await pairingState(page)) !== 'paired') await page.waitForTimeout(2000);
+}
+
 // Shows the pairing QR in the terminal (and saves it as qr.png) until the
 // phone scans it. The QR rotates now and then, so it's re-read every few
 // seconds and reprinted when it changes.
