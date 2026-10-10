@@ -176,7 +176,7 @@
     ...fields,
   });
 
-  const fromVerdict = (t, v, outcome) => row(t, { label: v.label, score: v.score, reason: v.reason, media: v.media, outcome });
+  const fromVerdict = (t, v, outcome, rule) => row(t, { label: v.label, score: v.score, reason: v.reason, media: v.media, outcome, rule: rule ?? undefined });
   const waitingRow = (t) => row(t, { label: 'pending', outcome: 'picture not checked yet: waits until the Messages tab is in the background' });
 
   // Classifies a thread and acts on it. Returns { row, done } where done
@@ -201,8 +201,8 @@
         return { row: row(t, { label: 'error', outcome, reason: err.message }), done };
       }
     }
-    const { outcome, del, archive, trash } = decide(v, { isNew, settings, thread: t });
-    if (!del && !archive) return { row: fromVerdict(t, v, outcome), done: true };
+    const { outcome, del, archive, trash, rule } = decide(v, { isNew, settings, thread: t });
+    if (!del && !archive) return { row: fromVerdict(t, v, outcome, rule), done: true };
 
     // Right before the trash, check again everything the decision rested on.
     // Settings were read when the scan started and may have changed since.
@@ -237,10 +237,10 @@
     try {
       const method = archive ? await archiveThread(t.id) : block ? await blockThread(t.id) : await deleteThread(t.id);
       const done = archive ? outcome.replace('archiving', 'archived') : block ? 'blocked & reported' : 'deleted';
-      return { row: { ...fromVerdict(t, v, done), method }, done: true };
+      return { row: { ...fromVerdict(t, v, done, rule), method }, done: true };
     } catch (err) {
       const what = archive ? 'archive' : block ? 'block & report' : 'delete';
-      return { row: fromVerdict(t, v, `${what} failed: ${err.message}`), done: true };
+      return { row: fromVerdict(t, v, `${what} failed: ${err.message}`, rule), done: true };
     }
   }
 

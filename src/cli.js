@@ -8,6 +8,7 @@ import vm from 'node:vm';
 import { parseArgs } from 'node:util';
 import { CONFIG_FILE, STATE_DIR, loadSettings, readConfig, writeConfig } from './config.js';
 import { Store } from './store.js';
+import { Db } from './db.js';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
 import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, waitForState } from './pair.js';
@@ -259,17 +260,15 @@ function runningPid() {
   }
 }
 
-function printLog(store, limit) {
-  const { log = [] } = store.get('log');
-  for (const entry of log.slice(0, limit)) console.log(formatEntry(entry));
-  if (!log.length) console.log('(log is empty)');
+function printLog(db, limit) {
+  const rows = db.events({ limit }).map((r) => ({ ...r, time: r.time }));
+  for (const entry of rows) console.log(formatEntry(entry) + (entry.rule ? ` [${entry.rule}]` : ''));
+  if (!rows.length) console.log('(log is empty)');
 }
 
-async function status(settings, store) {
-  const { lastScan, log = [], baselined = false } = store.get(['lastScan', 'log', 'baselined']);
-  const day = Date.now() - 86400000;
-  const recent = log.filter((e) => e.time >= day);
-  const count = (re) => recent.filter((e) => re.test(e.outcome ?? '')).length;
+async function status(settings, store, db) {
+  const { lastScan, baselined = false } = store.get(['lastScan', 'baselined']);
+  const c = db.counts(Date.now() - 86400000);
   const pid = runningPid();
   console.log(`config:    ${CONFIG_FILE} (mode ${settings.mode}, ${settings.dryRun ? 'dry run' : 'live'}, spam → ${settings.spamAction}, model ${settings.model})`);
   console.log(`state:     ${stateDir}`);
@@ -286,8 +285,8 @@ async function status(settings, store) {
   console.log(`baseline:  ${baselined ? 'done (existing threads marked as not new)' : 'not yet (the first run does it)'}`);
   console.log(`last scan: ${lastScan ? `${stamp(lastScan.time)} — ${lastScan.summary}` : 'never'}`);
   console.log(
-    `last 24 h: ${count(/^blocked/)} blocked, ${count(/^deleted/)} deleted, ${count(/^archived/)} archived, ` +
-      `${count(/not deleted: dry run/)} would-be actions (dry run), ${recent.filter((e) => e.label === 'error').length} errors`,
+    `last 24 h: ${c.blocked} blocked, ${c.deleted} deleted, ${c.archived} archived, ` +
+      `${c.dryRun} would-be actions (dry run), ${c.errors} errors, ${c.total} log entries`,
   );
   if (!fs.existsSync(path.join(stateDir, 'profile'))) {
     console.log('pairing:   no browser profile yet — run: messages-control pair --headed');
@@ -321,14 +320,19 @@ async function main() {
 
   fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   const store = new Store(path.join(stateDir, 'state.json'));
-  if (command === 'log') return printLog(store, Number(flags.limit) || 50);
+  const db = new Db(path.join(stateDir, 'state.db'));
+  // First run with a database: carry over the page's recent log.
+  if (db.counts(0).total === 0) for (const e of [...(store.get('log').log ?? [])].reverse()) db.recordEvent(e);
+  if (command === 'log') return printLog(db, Number(flags.limit) || 50);
   if (command === 'clear-log') {
+    // Clears the page's recent log and the last scan; the events table is
+    // the audit trail and stays.
     store.set({ log: [] });
     store.remove('lastScan');
     store.flush();
-    return console.log('Log cleared.');
+    return console.log('Recent log cleared (the events table in state.db is kept).');
   }
-  if (command === 'status') return status(settings, store);
+  if (command === 'status') return status(settings, store, db);
   if (command === 'policy') return policyCommand(settings, store, positionals[1] ?? 'show');
 
   const running = runningPid();
@@ -343,6 +347,7 @@ async function main() {
     if (exiting) return;
     exiting = true;
     store.flush();
+    db.close();
     if (command === 'run') fs.rmSync(PID_FILE, { force: true });
     await context.close().catch(() => {});
     process.exit(code);
@@ -362,13 +367,29 @@ async function main() {
     context,
     page,
     onLog: (entry) => {
+      try {
+        db.recordEvent(entry);
+      } catch (err) {
+        console.warn('event not recorded:', err.message);
+      }
       console.log(formatEntry(entry));
       if (ACTED.test(entry.outcome ?? '')) notify(settings, 'action', formatEntry(entry));
     },
     onFatal: (message) => fatal('llm-failing', message, EXIT_LLM),
   });
   await page.exposeFunction('__mcSend', (msg) => backend.handle(msg));
-  await page.exposeFunction('__mcStorage', (op, arg) => store[op](arg) ?? {});
+  await page.exposeFunction('__mcStorage', (op, arg) => {
+    const res = store[op](arg) ?? {};
+    // Keep the queryable copy of the verdicts current.
+    if (op === 'set' && arg?.verdicts) {
+      try {
+        db.syncVerdicts(arg.verdicts);
+      } catch (err) {
+        console.warn('verdicts not mirrored:', err.message);
+      }
+    }
+    return res;
+  });
 
   const deliver = (msg) => page.evaluate((m) => globalThis.__mcDeliver(m), msg);
   const injected = () => page.evaluate(() => !!globalThis.__mcInjected).catch(() => false);

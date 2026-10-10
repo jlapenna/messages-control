@@ -139,6 +139,15 @@ is gone does it exit `2` (run `pair --headed`); `3` means the LLM endpoint
 kept failing (restarts after 30 s). `notifyCommand` fires on all of these,
 e.g. `telegram-send "$MC_MESSAGE"`.
 
+## Storage
+
+`~/.local/state/messages-control/`: `profile/` (the browser, with the
+pairing), `state.json` (what the page keeps: seen threads, verdict cache,
+the recent log) and `state.db` (SQLite: an append-only `events` table with
+every log entry and the rule that produced it, and a `verdicts` table
+mirrored from the cache). `log` and `status` read `state.db`; `clear-log`
+clears only the page's recent log.
+
 ## Privacy
 
 Message text, sender names and (if enabled) pictures of threads that are
