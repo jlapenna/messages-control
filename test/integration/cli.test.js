@@ -60,7 +60,7 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   const outcome = (id) => log.find((e) => e.thread_id === id)?.outcome ?? '';
   assert.match(outcome('t-scam'), /^blocked & reported/);
   assert.match(outcome('t-marketing'), /^deleted, replied STOP/);
-  assert.match(outcome('t-otp'), /^kept: one-time code/);
+  assert.match(outcome('t-otp'), /^kept: one-time code, under 6 hours old/);
   assert.match(outcome('t-shipment'), /^kept$/);
   assert.equal(outcome('t-contact'), 'not checked: saved contact');
   assert.equal(log.find((e) => e.thread_id === 't-scam')?.rule, 'spam-block');
