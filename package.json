@@ -5,7 +5,8 @@
   "main": "background.js",
   "scripts": {
     "test": "node --test",
-    "start": "node bin/messages-control.js"
+    "start": "node bin/messages-control.js",
+    "prepare": "husky"
   },
   "repository": {
     "type": "git",
@@ -37,5 +38,8 @@
     "settings.js",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
 }

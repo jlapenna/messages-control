@@ -1,0 +1,64 @@
+# fleet-onboard: managed by jlapenna/agent-lcars tools/fleet-onboard.mjs. Re-run it to refresh; delete this line to own the file locally.
+name: Agent PR Auto-Merge
+
+# Thin caller of jlapenna/agent-lcars' fleet-published
+# agent-automerge-reusable.yml (its docs/published-actions.md owns the
+# contract). Agent-authored PRs (vars.AGENT_BOT_LOGINS) are armed for squash
+# auto-merge with a repository-scoped Agent LCARS App token, so the App's
+# merge emits the normal push/workflow_run chain, closes linked issues, and
+# deletes the branch.
+
+on:
+  # App credentials must only enter workflow code loaded from the trusted
+  # default branch. pull_request_target supplies PR metadata without
+  # evaluating the PR head; no job here checks out or executes PR content.
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, labeled]
+  # Reconciliation is event-driven. A push to main is when an armed PR falls
+  # behind and when a PR still armed by github-actions[bot] is re-armed as
+  # the App.
+  push:
+    branches: [main]
+  # Every workflow that posts checks on a PR head: a PR turns green when the
+  # last one succeeds. The reusable admits only successful same-repository
+  # pull_request runs.
+  workflow_run:
+    workflows: [CI, validate, gitleaks, ruleset]
+    types: [completed]
+  # Daily backstop, not a poll: a review thread resolved after checks went
+  # green, a late arm, mergeability still UNKNOWN when an event's sweep ran,
+  # or a transiently failed sweep emits no subscribable event.
+  schedule:
+    - cron: '53 9 * * *'
+  # Manual repair, e.g. after an Actions outage dropped events.
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  checks: read
+  contents: write
+  issues: write
+  pull-requests: write
+  statuses: read
+
+# Pull-request-target events for one PR supersede each other; push,
+# workflow_run, schedule, and dispatch reconciliation use their own run IDs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request_target' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
+
+jobs:
+  automerge:
+    uses: jlapenna/agent-lcars/.github/workflows/agent-automerge-reusable.yml@main # latest
+    with:
+      bot-logins: ${{ vars.AGENT_BOT_LOGINS }}
+      fleet-login: ${{ vars.AGENT_FLEET_LOGIN }}
+      app-token-enabled: true
+      app-client-id: ${{ vars.AGENT_LCARS_CLIENT_ID }}
+      # Glue work must never queue behind a long agent session.
+      runs-on: '["ubuntu-latest"]'
+      # The required checks in this repository's Protect main ruleset
+      # (infra/github-ruleset/main.tf).
+      required-checks: '["gitleaks","validate / repository validation","repository-owned Terraform","test"]'
+    secrets:
+      APP_PRIVATE_KEY: ${{ secrets.AGENT_LCARS_PRIVATE_KEY }}
