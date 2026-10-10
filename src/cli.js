@@ -2,13 +2,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import readline from 'node:readline/promises';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { parseArgs } from 'node:util';
 import { CONFIG_FILE, STATE_DIR, loadSettings, readConfig, writeConfig } from './config.js';
 import { Store } from './store.js';
 import { Db } from './db.js';
+import { notify as sendNotification } from './notify.js';
+import { digestText, parseSince } from './digest.js';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
 import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, waitForState } from './pair.js';
@@ -45,11 +47,15 @@ Commands (default: run)
   test-classifier  send sample texts to the LLM and print the verdicts
   install-service  write a systemd user unit; --enable starts it now
   uninstall-service
+  digest           summary of the last day (--since 7d; --send sends it)
   policy show      the rules in force (defaults, mode and config applied)
   policy test      replay the cached verdicts through the rules: what each
                    rule would do, without touching anything
 
 Options
+  --digest HH:MM   with install-service: also a daily digest timer
+  --since 24h      for digest (h, d or m)
+  --send           for digest: send it through the notify channels
   --headed         show the browser window
   --live           act on spam and marketing; the default is a dry run
   --mode MODE      spam (default: new threads only) or full (labels the
@@ -59,14 +65,14 @@ Options
 
 Config: ${CONFIG_FILE} (keys as in settings.js; the API key lives there,
 owner-only) or MESSAGES_CONTROL_API_KEY in the environment.
-"notifyCommand" in the config runs on every action and failure with
-MC_EVENT and MC_MESSAGE in its environment.
+"notify" in the config: { "telegram": { "token", "chatId" }, "command": "...",
+"events": [...] } — actions, pairing approvals, failures and digests go there.
 Exit codes: ${EXIT_UNPAIRED} = not paired (run pair --headed), ${EXIT_LLM} = LLM endpoint failing.
 To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
   'run', 'pair', 'scan', 'sweep', 'act-on-spam', 'check-pictures', 'diagnose', 'log', 'clear-log',
-  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy',
+  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest',
 ]);
 
 const { values: flags, positionals } = parseArgs({
@@ -79,6 +85,9 @@ const { values: flags, positionals } = parseArgs({
     mode: { type: 'string' },
     'state-dir': { type: 'string', default: STATE_DIR },
     limit: { type: 'string', default: '50' },
+    since: { type: 'string' },
+    send: { type: 'boolean', default: false },
+    digest: { type: 'string' },
     endpoint: { type: 'string' },
     model: { type: 'string' },
     'api-key': { type: 'string' },
@@ -98,17 +107,9 @@ function formatEntry(entry) {
   return `${stamp(entry.time)} ${parts.join(' · ')}`;
 }
 
-// "notifyCommand" from the config, fire and forget, with the event in the
-// environment: a hook for Telegram, mail, anything.
-function notify(settings, event, message) {
-  if (!settings.notifyCommand) return;
-  const child = spawn('sh', ['-c', settings.notifyCommand], {
-    env: { ...process.env, MC_EVENT: event, MC_MESSAGE: message },
-    stdio: 'ignore',
-    detached: true,
-  });
-  child.on('error', (err) => console.warn('notifyCommand failed:', err.message));
-  child.unref();
+// Notifications never block or fail the thing they report on.
+function notify(settings, event, message, opts) {
+  sendNotification(settings, event, message, opts).catch((err) => console.warn('notify failed:', err.message));
 }
 
 const ACTED = /^(deleted|blocked & reported|archived)/;
@@ -231,23 +232,51 @@ WantedBy=default.target
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, unit);
   console.log(`Wrote ${file}`);
+  const units = ['messages-control'];
+  if (flags.digest) {
+    if (!/^\d{1,2}:\d{2}$/.test(flags.digest)) throw new Error('--digest wants HH:MM');
+    const dir = path.dirname(file);
+    fs.writeFileSync(path.join(dir, 'messages-control-digest.service'), `[Unit]
+Description=Messages Control daily digest
+
+[Service]
+Type=oneshot
+ExecStart=${process.execPath} ${path.join(root, 'bin', 'messages-control.js')} digest --send${stateDir !== STATE_DIR ? ` --state-dir ${stateDir}` : ''}
+`);
+    fs.writeFileSync(path.join(dir, 'messages-control-digest.timer'), `[Unit]
+Description=Messages Control daily digest at ${flags.digest}
+
+[Timer]
+OnCalendar=*-*-* ${flags.digest.padStart(5, '0')}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+`);
+    console.log(`Wrote ${path.join(dir, 'messages-control-digest.timer')} (daily at ${flags.digest})`);
+    units.push('messages-control-digest.timer');
+  }
   if (flags.enable) {
     execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' });
-    execFileSync('systemctl', ['--user', 'enable', '--now', 'messages-control'], { stdio: 'inherit' });
+    execFileSync('systemctl', ['--user', 'enable', '--now', ...units], { stdio: 'inherit' });
     console.log('Started. Logs: journalctl --user -fu messages-control');
   } else {
-    console.log('Start it: systemctl --user daemon-reload && systemctl --user enable --now messages-control');
+    console.log(`Start it: systemctl --user daemon-reload && systemctl --user enable --now ${units.join(' ')}`);
   }
   console.log('To keep it running while logged out: loginctl enable-linger (WSL: sudo loginctl enable-linger $USER)');
 }
 
 function uninstallService() {
   const file = serviceUnitPath();
-  try {
-    execFileSync('systemctl', ['--user', 'disable', '--now', 'messages-control'], { stdio: 'ignore' });
-  } catch {}
-  if (fs.existsSync(file)) fs.unlinkSync(file);
-  console.log(`Removed ${file}`);
+  for (const unit of ['messages-control', 'messages-control-digest.timer']) {
+    try {
+      execFileSync('systemctl', ['--user', 'disable', '--now', unit], { stdio: 'ignore' });
+    } catch {}
+  }
+  for (const f of [file, ...['messages-control-digest.service', 'messages-control-digest.timer'].map((n) => path.join(path.dirname(file), n))]) {
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
+  console.log(`Removed ${file} (and the digest timer, if any)`);
 }
 
 function runningPid() {
@@ -333,6 +362,15 @@ async function main() {
     return console.log('Recent log cleared (the events table in state.db is kept).');
   }
   if (command === 'status') return status(settings, store, db);
+  if (command === 'digest') {
+    const text = digestText(db, { since: Date.now() - parseSince(flags.since) });
+    console.log(text);
+    if (flags.send) {
+      const sent = await sendNotification(settings, 'digest', text);
+      console.log(sent.length ? `sent via ${sent.length} channel(s)` : 'no notify channel configured');
+    }
+    return;
+  }
   if (command === 'policy') return policyCommand(settings, store, positionals[1] ?? 'show');
 
   const running = runningPid();
@@ -427,7 +465,7 @@ async function main() {
     // approve (the emoji). The watcher keeps asking, with a fresh emoji each
     // round and the notifications spaced out, so a tap at any time heals it;
     // one-off commands try once and exit 2.
-    const onApproval = (file, message) => notify(settings, 'pairing-approval', `${message} (picture: ${file})`);
+    const onApproval = (file, message) => notify(settings, 'pairing-approval', message, { photo: file });
     for (let round = 0; ; round++) {
       const resumed = await resumePairing(page, { stateDir, timeout: (command === 'pair' ? 30 : 10) * 60000, onApproval });
       if (resumed) {
