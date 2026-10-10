@@ -1,6 +1,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
@@ -56,10 +57,22 @@ test('metrics is Prometheus text and needs no token', async () => {
   assert.match(text, /^messages_control_last_scan_timestamp_seconds 1700000000$/m);
 });
 
+// fetch() drops a custom Host header, so these go through http.request.
+const rawGet = (pathname, host) =>
+  new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port: server.address().port, path: pathname, headers: { Host: host } }, (res) => {
+      res.resume();
+      res.on('end', () => resolve(res.statusCode));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+
 test('a foreign Host header is refused (DNS rebinding)', async () => {
-  const res = await fetch(`${base}/healthz`, { headers: { Host: 'evil.example' } });
-  assert.equal(res.status, 421);
-  assert.equal((await fetch(`${base}/healthz`, { headers: { Host: 'localhost:9' } })).status, 200);
+  assert.equal(await rawGet('/healthz', 'evil.example'), 421);
+  assert.equal(await rawGet('/healthz', 'evil.example:7373'), 421);
+  assert.equal(await rawGet('/healthz', 'localhost:9'), 200);
+  assert.equal(await rawGet('/healthz', '127.0.0.1'), 200);
   const page = await fetch(`${base}/`);
   assert.match(page.headers.get('content-security-policy'), /connect-src 'self'/);
 });
