@@ -56,6 +56,14 @@ test('metrics is Prometheus text and needs no token', async () => {
   assert.match(text, /^messages_control_last_scan_timestamp_seconds 1700000000$/m);
 });
 
+test('a foreign Host header is refused (DNS rebinding)', async () => {
+  const res = await fetch(`${base}/healthz`, { headers: { Host: 'evil.example' } });
+  assert.equal(res.status, 421);
+  assert.equal((await fetch(`${base}/healthz`, { headers: { Host: 'localhost:9' } })).status, 200);
+  const page = await fetch(`${base}/`);
+  assert.match(page.headers.get('content-security-policy'), /connect-src 'self'/);
+});
+
 test('the dashboard is served at / and /api needs the token', async () => {
   const page = await fetch(`${base}/`);
   assert.equal(page.status, 200);
