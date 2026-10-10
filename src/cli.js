@@ -9,7 +9,7 @@ import { CONFIG_FILE, STATE_DIR, loadSettings, readConfig, writeConfig } from '.
 import { Store } from './store.js';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
-import { LIST, MESSAGES_URL, pair, pairingState, waitForPairing, waitForState } from './pair.js';
+import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, waitForState } from './pair.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // The extension's page-side code, unchanged, behind a chrome.* shim.
@@ -363,6 +363,17 @@ async function main() {
   }
   async function ensurePaired() {
     if ((await waitForState(page)) === 'paired') return;
+    // Headless: sign in again with the Google session and ask the phone to
+    // approve (the emoji); `pair` waits longer than the watcher.
+    const resumed = await resumePairing(page, {
+      stateDir,
+      timeout: (command === 'pair' ? 30 : 10) * 60000,
+      onApproval: (file) => notify(settings, 'pairing-approval', `Approve on the phone: open Google Messages and match the emoji in ${file}`),
+    });
+    if (resumed) {
+      console.log('Paired again.');
+      return;
+    }
     if (!flags.headed && command !== 'pair') {
       await fatal('unpaired', 'Not paired with the phone. Run: messages-control pair --headed', EXIT_UNPAIRED);
       return;
@@ -420,6 +431,16 @@ async function main() {
     }
   }
   page.on('load', mend);
+  // A pairing revoked elsewhere (the phone, another device) doesn't move a
+  // page that is already open: only a reload shows it. Reload now and then,
+  // between scans; content.js is re-injected on load.
+  const reloadEvery = Math.max(1, Number(settings.reloadMinutes) || 20) * 60000;
+  setInterval(async () => {
+    if (exiting || mending) return;
+    const scanning = await page.evaluate(() => !!globalThis.MessagesControlScanning).catch(() => true);
+    if (scanning) return;
+    await page.reload({ waitUntil: 'domcontentloaded' }).catch((err) => console.warn('reload failed:', err.message));
+  }, reloadEvery);
   // Test hook: pretend the phone unpaired us after N seconds, to exercise the
   // recovery path (mend → ensurePaired → exit 2) without touching the pairing.
   const fakeUnpair = Number(process.env.MESSAGES_CONTROL_TEST_UNPAIR_AFTER);

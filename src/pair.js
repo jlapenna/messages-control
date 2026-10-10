@@ -61,6 +61,40 @@ async function rememberComputer(page) {
   });
 }
 
+// The Google session usually outlives the Messages pairing: after an unpair
+// the welcome page offers "Continue as <name>", and Messages then asks the
+// person to match an emoji in the phone's app. No window is needed: the emoji
+// is saved as a picture (pairing-emoji.png in the state dir) and handed to
+// onApproval, and this waits for the phone. Returns true once the list shows.
+export async function resumePairing(page, { stateDir, timeout = 10 * 60000, onApproval = () => {}, out = console.log } = {}) {
+  const signIn = page.getByRole('button', { name: /^(sign in|continue as .+)$/i }).first();
+  // The welcome page shows its button once it has looked up the session.
+  if (!(await signIn.waitFor({ timeout: 15000 }).then(() => true, () => false))) return false;
+  out("Signing in again with the browser's Google session…");
+  await signIn.click().catch(() => {});
+  const end = Date.now() + timeout;
+  let announced = false;
+  while (Date.now() < end) {
+    if ((await pairingState(page)) === 'paired') return true;
+    // Google's account chooser, if it appears: one entry per account.
+    const account = page.locator('[data-identifier]').first();
+    if (await account.isVisible().catch(() => false)) await account.click().catch(() => {});
+    if (!announced && /\/web\/pair/.test(page.url())) {
+      const file = path.join(stateDir, 'pairing-emoji.png');
+      // The emoji is an inline SVG picture that replaces a spinner.
+      const emoji = page.locator('img[src^="data:image/svg"]').last();
+      const shown = await emoji.waitFor({ timeout: 20000 }).then(() => true, () => false);
+      if (shown) await emoji.screenshot({ path: file }).catch(() => page.screenshot({ path: file }));
+      else await page.screenshot({ path: file });
+      announced = true;
+      out(`Approve on the phone: open Google Messages and tap the emoji shown in ${file}`);
+      await onApproval(file);
+    }
+    await page.waitForTimeout(2000);
+  }
+  return false;
+}
+
 // Headed: a person is at the window, so they sign in with the Google account
 // the phone uses (or scan the QR themselves); this just waits for the list.
 export async function waitForPairing(page, { out = console.log } = {}) {
