@@ -424,6 +424,10 @@ async function main() {
     if (mending || exiting) return;
     mending = true;
     try {
+      await Promise.race([
+        page.evaluate(() => 1),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('page not answering: browser hung or closed')), 20000)),
+      ]);
       const state = await pairingState(page);
       if (state === 'unpaired') {
         await ensurePaired();
@@ -432,6 +436,12 @@ async function main() {
         await inject();
       }
     } catch (err) {
+      // A dead browser or crashed page answers nothing useful again: exit so
+      // the service manager restarts a fresh one.
+      if (/closed|crashed|Target page, context or browser/i.test(err.message)) {
+        await fatal('browser-closed', `The browser is gone (${err.message.split('\n')[0]}).`, EXIT_ERROR);
+        return;
+      }
       console.warn('recovery failed:', err.message);
     } finally {
       mending = false;
