@@ -104,6 +104,9 @@ export const DEFAULTS = {
   topN: 20,
   // Label existing threads for display (badge, side panel). Off in spam mode.
   labelExisting: true,
+  // Standalone only: reload the page this often (between scans) so a pairing
+  // revoked from the phone is noticed.
+  reloadMinutes: 20,
   prompt: DEFAULT_PROMPT,
 };
 

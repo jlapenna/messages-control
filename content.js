@@ -311,6 +311,7 @@
     // trash spam unless dry run is on.
     const { includeSeen = false, checkPictures = false, trashSpam = false, processAll = false } = opts;
     scanning = true;
+    globalThis.MessagesControlScanning = true; // read by the standalone runner
     try {
       const { settings } = await send({ type: 'getSettings' });
       if (!settings.enabled && !includeSeen && !checkPictures && !trashSpam && !processAll) return 'Watching is off.';
@@ -548,6 +549,7 @@
     } finally {
       forceOpen = false;
       scanning = false;
+      globalThis.MessagesControlScanning = false;
       if (rescan) {
         rescan = false;
         const next = pendingOpts;
