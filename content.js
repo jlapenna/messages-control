@@ -75,18 +75,20 @@
 
   // Bump when classification changes enough that old verdicts should be redone
   // (2: spam_probability scoring and picture checks; 3: notifications;
-  // 4: byModel, so codes can be archived; 5: marketing).
-  const VERDICT_VERSION = 5;
+  // 4: byModel, so codes can be archived; 5: marketing; 6: utility and bank
+  // alerts are no longer marketing).
+  const VERDICT_VERSION = 6;
   // A verdict is reused only for the same preview text and the same latest
   // message: picture threads all say "Picture", so a newer message (by list
   // timestamp, 5 minutes' slack for "34 min" drifting) invalidates it.
   const STALE_SLACK_MS = 5 * 60000;
-  // Version 5 only split marketing out of "ok", so spam, otp and notice
-  // verdicts from 3 and 4 still hold (4 only changed one-time codes, so otp
-  // needs 4+); throwing them away cost the history its labels.
+  // Each version only redraws one line, so older verdicts on the other side
+  // of it still hold (throwing them away cost the history its labels):
+  // 6 narrowed marketing, 5 split marketing out of "ok", 4 changed codes.
   const versionOk = (v) =>
     v.version === VERDICT_VERSION ||
-    (v.label !== 'ok' && (v.version === 4 || (v.version === 3 && v.label !== 'otp')));
+    (v.label !== 'marketing' &&
+      (v.version === 5 || (v.label !== 'ok' && (v.version === 4 || (v.version === 3 && v.label !== 'otp')))));
   const cached = (verdicts, t) => {
     const v = verdicts[t.id];
     if (!v || v.text !== t.text || !versionOk(v)) return null;
@@ -496,9 +498,11 @@
         // Threads only labelled earlier in this scan still count; skip only
         // those already acted on.
         const acted = (t) => /^(deleted|blocked)/.test(rows.get(t.id)?.outcome ?? '');
+        // "Process all messages" also trashes marketing in the history;
+        // "Act on existing spam" is spam only, as it says.
         const spam = threads.filter((t) => {
           const v = !acted(t) && cached(verdicts, t);
-          return v && v.label === 'spam' && v.score >= settings.threshold;
+          return v && ((v.label === 'spam' && v.score >= settings.threshold) || (processAll && v.label === 'marketing'));
         });
         let moved = 0;
         const actFailed = [];
@@ -522,7 +526,7 @@
           if (['deleted', 'blocked & reported'].includes(res.row.outcome)) moved++;
           if (res.abort) break;
         }
-        notes.push(`${settings.spamAction === 'block' ? 'blocked & reported' : 'moved to trash'} ${moved} of ${spam.length} spam threads`);
+        notes.push(`acted on ${moved} of ${spam.length} spam${processAll ? ' and marketing' : ''} threads`);
       }
 
       // In "Process all messages" the whole backlog was just classified; what
