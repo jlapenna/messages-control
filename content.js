@@ -163,55 +163,9 @@
     return v;
   }
 
-  // What should happen to a thread with this verdict, and why. Pure: the
-  // caller performs the delete when this says so.
-  // Notices and one-time codes stop mattering after a day; with the setting
-  // on, they go to trash once 2+ calendar days old (so at least 24 hours).
-  // Notices stop mattering after a day, one-time codes after a few hours, so
-  // they are archived past these ages. Archiving keeps the history and
-  // Messages brings the thread back on a new message, so any sender qualifies
-  // and dry run (which only forbids trashing) doesn't apply. Only labels the
-  // model gave count: the OTP regex backstop can match a person's "gate code
-  // is 4821".
-  const ARCHIVE_AFTER_HOURS = { otp: 6, notice: 24 };
-  // Minimum possible age in hours of the thread's latest message. Before
-  // today the list shows only a day ("Yesterday", "Monday", "Sep 29"), so
-  // assume the message came at the very end of that day: never archive early.
-  function minAgeHours(t, now = Date.now()) {
-    if (t.msgTime == null) return null;
-    // End of that calendar day (not +24 h, which is off on DST-change days).
-    const d = new Date(t.msgTime);
-    const end = t.recent ? t.msgTime : new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
-    return Math.max(0, (now - end) / 3600000);
-  }
-  const fmtHours = (h) => (h < 48 ? `${Math.floor(h)} hours old` : `${Math.floor(h / 24)} days old`);
-
-  function decideExpiring(v, t, settings) {
-    const kind = v.label === 'otp' ? 'one-time code' : 'notification';
-    const limit = ARCHIVE_AFTER_HOURS[v.label];
-    if (!settings.archiveOldNotices) return { outcome: `kept: ${kind}` };
-    // Notices only ever come from the model; a code may come from the regex.
-    if (v.label === 'otp' && v.byModel !== true) {
-      return { outcome: `kept: ${kind} (code pattern only, not confirmed by the model)` };
-    }
-    const age = minAgeHours(t);
-    if (age == null) return { outcome: `kept: ${kind}, age unknown` };
-    if (age < limit) return { outcome: `kept: ${kind}, under ${limit === 24 ? 'a day' : `${limit} hours`} old` };
-    return { outcome: `archiving (${kind}, at least ${fmtHours(age)})`, archive: true };
-  }
-
-  // Marketing is not spam: a promotion from a business is deleted (trash),
-  // never blocked and reported, so a store you buy from is never reported
-  // to Google. Spam goes by spamAction (block & report, or trash).
-  function decide(v, { isNew, settings, thread }) {
-    if (v.label === 'otp' || v.label === 'notice') return decideExpiring(v, thread, settings);
-    if (v.label === 'ok') return { outcome: 'kept' };
-    if (v.label === 'spam' && v.score < settings.threshold) return { outcome: `kept: below ${pct(settings.threshold)} threshold` };
-    if (!isNew) return { outcome: 'not deleted: existing thread' };
-    if (settings.dryRun) return { outcome: 'not deleted: dry run' };
-    return { outcome: 'deleting…', del: true, trash: v.label === 'marketing' };
-  }
-
+  // What should happen to a thread with this verdict, and why (policy.js).
+  // Pure: the caller performs the action when this says so.
+  const decide = (v, ctx) => globalThis.MessagesPolicy.decide(v, ctx);
 
   // One row per thread, shared by the activity log and the last-scan list.
   const row = (t, fields) => ({
@@ -512,11 +466,14 @@
         // Threads only labelled earlier in this scan still count; skip only
         // those already acted on.
         const acted = (t) => /^(deleted|blocked)/.test(rows.get(t.id)?.outcome ?? '');
-        // "Process all messages" also trashes marketing in the history;
-        // "Act on existing spam" is spam only, as it says.
+        // "Process all messages" acts on everything the rules would delete
+        // (marketing too); "Act on existing spam" only on what gets blocked
+        // or trashed as spam.
         const spam = threads.filter((t) => {
           const v = !acted(t) && cached(verdicts, t);
-          return v && ((v.label === 'spam' && v.score >= settings.threshold) || (processAll && v.label === 'marketing'));
+          if (!v) return false;
+          const d = decide(v, { isNew: true, settings: { ...settings, dryRun: false }, thread: t });
+          return d.del && (processAll || !d.trash);
         });
         let moved = 0;
         const actFailed = [];
