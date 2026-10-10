@@ -115,11 +115,22 @@ function loadSettingsFromFlags() {
 async function init() {
   const current = { ...readConfig() };
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  // The key is typed without echo, so it doesn't end up on screen or in a
+  // terminal scrollback.
+  let muted = false;
+  rl._writeToOutput = (s) => {
+    if (!muted) process.stdout.write(s);
+  };
   const ask = async (label, key, fallback) => {
     const flag = flags[key === 'apiKey' ? 'api-key' : key];
     if (flag) return flag;
     const def = current[key] ?? fallback;
-    const answer = (await rl.question(`${label} [${key === 'apiKey' && def ? '•••' : def}]: `)).trim();
+    const secret = key === 'apiKey';
+    process.stdout.write(`${label} [${secret && def ? 'kept' : def}]: `);
+    muted = secret;
+    const answer = (await rl.question('')).trim();
+    muted = false;
+    if (secret) process.stdout.write('\n');
     return answer || def;
   };
   try {

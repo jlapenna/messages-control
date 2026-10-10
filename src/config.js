@@ -24,6 +24,8 @@ export function readConfig() {
 export function writeConfig(config) {
   fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true, mode: 0o700 });
   fs.writeFileSync(CONFIG_FILE, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  // The mode above only applies to a new file; an existing one keeps its own.
+  fs.chmodSync(CONFIG_FILE, 0o600);
 }
 
 // Spam mode touches nothing but new threads: no labels on the history, no
