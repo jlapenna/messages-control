@@ -15,7 +15,24 @@
   "build": {
     "appId": "net.jlapenna.messages-control",
     "productName": "Messages Control",
-    "files": ["main.js", "preload.js"],
-    "extraResources": [{ "from": "..", "to": "app", "filter": ["bin/**", "src/**", "*.js", "package.json", "LICENSE", "node_modules/**"] }]
-  }
+    "files": [
+      "main.js",
+      "preload.js"
+    ],
+    "extraResources": [
+      {
+        "from": "..",
+        "to": "app",
+        "filter": [
+          "bin/**",
+          "src/**",
+          "*.js",
+          "package.json",
+          "LICENSE",
+          "node_modules/**"
+        ]
+      }
+    ]
+  },
+  "author": "Joe LaPenna"
 }
