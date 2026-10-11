@@ -1,3 +1,11 @@
 node_modules/
 desktop/node_modules/
 desktop/dist/
+.env
+.env.*
+!.env.example
+config.json
+state.json
+state.db*
+profile/
+pairing-emoji.png

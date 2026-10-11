@@ -1,4 +1,5 @@
 import { getSettings } from './settings.js';
+import { endpointPermission } from './endpoint-permission.js';
 
 const LOG_LIMIT = 300;
 // Backstop for the model: a code-ish word near a 4-8 digit number.
@@ -41,6 +42,9 @@ async function toDataUrl(src) {
 async function classify(thread) {
   const s = await getSettings();
   if (!s.apiKey) throw new Error('No API key set (open the extension options).');
+  if (!await chrome.permissions.contains(endpointPermission(s.endpoint))) {
+    throw new Error('Endpoint access is missing. Open extension options and click Save to allow this endpoint.');
+  }
   const body = thread.texts?.length ? thread.texts.join('\n---\n') : thread.text;
   const media = thread.media
     ? thread.images?.length

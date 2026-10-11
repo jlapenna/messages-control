@@ -21,3 +21,5 @@ jobs:
       # check on purpose: one consumer, one lane.
       - run: npx playwright install --with-deps chromium
       - run: npm run test:integration
+      - run: npm ci --prefix desktop --ignore-scripts
+      - run: npm run test:desktop

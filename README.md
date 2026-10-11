@@ -13,7 +13,10 @@ classified by an LLM you point it at (any OpenAI-compatible endpoint), and:
   kept and listed in the daily digest with what the model extracted:
   summary, date, amount, confirmation or tracking number.
 
-Threads from saved contacts are never touched. It starts in **dry run**:
+By default, automatic classification skips threads whose displayed name has
+no digits or `@`. This is a heuristic, not an address-book lookup: a saved
+contact with digits or an email address in its name is not protected by it.
+It starts in **dry run**:
 spam and marketing are logged, not blocked or trashed, until you pass
 `--live`. Dry run does not hold back `full` mode's archiving of old codes and
 notices, and opening a picture thread marks it read either way.
@@ -21,10 +24,15 @@ notices, and opening a picture thread marks it read either way.
 Two modes. `spam` (the default) does only the above, on new threads. `full`
 also labels your history and archives one-time codes after 6 hours and
 automated notices (order ready, delivered, driver arriving) after a day.
-The [control plane spec](https://claude.ai/code/artifact/ec83c12d-7c1d-4f2c-9ff9-e97a2546cdca)
-describes where `full` is going.
+Review activity before enabling live actions. Classification can make mistakes;
+blocks and archives are reversible, but deleted conversations are not.
 
 ## Install
+
+The standalone CLI is tested with Node.js 24 on Linux. Pairing requires a
+graphical desktop and an Android phone using Google Messages. This is an
+experimental tool that drives the Messages web UI; selector changes can break
+it. Start in spam mode and dry run, and inspect the outcomes before `--live`.
 
 ```sh
 git clone https://github.com/jlapenna/messages-control && cd messages-control
@@ -39,12 +47,34 @@ Or Docker, where Chromium comes with the base image:
 
 ```sh
 docker build -t messages-control .
-docker run -it -v messages-control:/data -e MESSAGES_CONTROL_API_KEY messages-control init
-docker run -d  -v messages-control:/data --restart unless-stopped messages-control run --live
+docker run --rm -it -v messages-control:/data messages-control init
+docker run -d --name messages-control -v messages-control:/data --restart unless-stopped messages-control run
 ```
 
-(Pairing needs a window; do it on a desktop and copy the state volume, or
-run `pair --headed` locally with the same `--state-dir`.)
+The image stores both configuration (`/data/config.json`) and message state
+in the volume. It contains API keys, private messages and the paired browser
+profile; keep it private. To use an environment API key instead, pass
+`-e MESSAGES_CONTROL_API_KEY` to each container that needs it.
+
+Pairing needs a window: pair locally with `--state-dir /path/to/state`, then
+copy that directory's contents into `/data` before starting the container.
+Keep the volume's `config.json` from `init`; local configuration is stored
+separately by default. Use dry run first; add `--live` only after reviewing
+the log. The dashboard binds to container loopback by default; exposing it
+requires configuring `api.bind`, allowed `api.hosts` and an authenticated
+reverse proxy as described below.
+
+## Chrome extension
+
+Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**,
+and select this repository. Open the extension's options, set your endpoint,
+model and API key, then click **Save**. Chrome asks for access to that endpoint's
+host; denial leaves the previous settings unchanged. HTTP and HTTPS endpoints
+are supported, including local gateways; use HTTPS for remote services.
+Only Google Messages and its picture hosts are required permissions at
+installation. Classifier access is requested for the selected host at runtime.
+After updating an existing installation, click Save again if endpoint access
+is missing. Pair Google Messages in the same Chrome profile before using it.
 
 ## Pairing
 
@@ -88,7 +118,7 @@ overrides the defaults in `settings.js`:
 | `dryRun` | `true` | `--live` sets it false for that run; holds blocks and trashing only, not `full` mode's archiving |
 | `spamAction` | `block` | `block` (block & report) or `trash` |
 | `threshold` | `0.8` | spam probability needed to act |
-| `skipNamedContacts` | `true` | never touch threads whose name has no digits |
+| `skipNamedContacts` | `true` | skip automatic classification when the displayed name has no digits or `@`; not an address-book lookup |
 | `openPictureThreads` | `true` | open picture threads so the model sees them (marks them read) |
 | `unsubscribeMarketing` | `false` | reply `unsubscribeText` (`STOP`) to a marketing sender before trashing its thread |
 | `notifyCommand` | | shell command run on every action and failure, with `MC_EVENT` and `MC_MESSAGE` set |
@@ -131,8 +161,9 @@ of blocking them:
 
 Fields: `match.label` (list), `match.minScore` (number or `"threshold"`),
 `match.byModel`, `action` (`block_report`, `trash`, `archive_after` with
-`hours`, `keep`, or `spamAction`), `modes`, `enabled`. Threads from saved
-contacts never reach the rules.
+`hours`, `keep`, or `spamAction`), `modes`, `enabled`. Threads skipped by the
+name heuristic do not reach the automatic rules. Explicit manual actions
+still operate on the thread you select.
 
 ## Notifications and the daily digest
 
@@ -219,6 +250,11 @@ It expects Node and the repo's `node_modules` (`npm install` at the top
 level, `npx playwright install chromium`) beside it; `MESSAGES_CONTROL_NODE`
 points it at a specific node binary.
 
+The desktop build narrowly overrides `global-agent` for `@electron/get` 3.x
+to 4.1.3, removing the obsolete `roarr`/`sprintf-js` dependency chain. Its proxy
+bootstrap is exercised against a local fixture in the required CI test job.
+Remove the override when the upstream downloader dependency no longer needs it.
+
 ## Running as a service
 
 ```sh
@@ -252,11 +288,25 @@ clears only the page's recent log.
 
 ## Privacy
 
-Message text, sender names and (if enabled) pictures of threads that are
-not from saved contacts are sent to the LLM endpoint *you* configure.
-Nothing else leaves the machine. The browser profile and `state.json` are
-owner-only; the log keeps the model's one-line reasons and the first 500
-characters of each checked thread.
+Classification sends message text, sender names and enabled pictures to the
+LLM endpoint you configure. The name heuristic described above is not a
+guarantee that saved contacts are excluded. Your provider's retention and
+privacy terms apply to that data.
+
+Google Messages communicates with Google and your paired phone. Opening a
+conversation can mark it read and send RCS receipts. Block & report sends the
+sender's number and recent messages to Google; configured STOP replies send
+an outgoing message to the sender. Optional Telegram or command notifications
+and digest delivery can send sender information, classification reasons,
+message summaries and pairing approval information to their configured
+destinations.
+
+Configuration, the browser profile, `state.json` and `state.db` contain
+sensitive credentials or message data. Configuration and state files are
+written with owner-only permissions; protect the state directory, Docker
+volume and backups too. Activity previews retain up to 500 characters.
+Do not include real messages, API keys, tokens or browser profiles in issues
+or screenshots. See [SECURITY.md](SECURITY.md) for private reporting guidance.
 
 ## Development
 
@@ -273,6 +323,18 @@ selector changes and the `content.js` flow in Google's own DOM:
 `messages-control diagnose` and `--headed`; run the mock by hand with
 `node test/integration/mock/server.mjs 7474` and
 `MESSAGES_CONTROL_MESSAGES_URL=http://127.0.0.1:7474/web/`.
+
+Desktop dependency verification uses `npm ci --prefix desktop` followed by
+`npm run test:desktop`: the downloader's actual proxy bootstrap and HTTP
+download run against a local proxy fixture. The required CI job installs
+desktop dependencies without lifecycle scripts for this check. Dependency
+audits are `npm audit` and `npm audit --prefix desktop`.
+
+The required `gitleaks` check runs `tools/scan-secrets.sh` with a pinned,
+checksum-verified Gitleaks binary and scans full available Git history for
+every event. It does not require a license secret or skip fork PRs.
+Run it locally with Gitleaks 8.18.2 on PATH or `GITLEAKS_BIN=/path/to/gitleaks`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor setup.
 
 - `messages-dom.js`: Google Messages DOM driver (list, read, delete, block,
   archive, diagnose). No `chrome.*` APIs.

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Messages Control",
   "version": "0.1.0",
-  "description": "Classifies each new Google Messages thread with llm.jlapenna.net and deletes the ones judged spam.",
+  "description": "Classifies Google Messages threads with your chosen LLM endpoint and applies your cleanup rules.",
   "permissions": [
     "storage",
     "sidePanel",
@@ -10,9 +10,9 @@
   ],
   "host_permissions": [
     "https://messages.google.com/*",
-    "https://*.googleusercontent.com/*",
-    "https://llm.jlapenna.net/*"
+    "https://*.googleusercontent.com/*"
   ],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"

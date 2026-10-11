@@ -1,4 +1,5 @@
 import { DEFAULTS, DEFAULT_PROMPT, getSettings } from './settings.js';
+import { endpointPermission } from './endpoint-permission.js';
 
 const $ = (id) => document.getElementById(id);
 const status = (text) => ($('status').textContent = text);
@@ -28,6 +29,10 @@ function read() {
 // Only a customized prompt is stored, so prompt improvements reach everyone else.
 async function save() {
   const values = read();
+  // Invoke request before any await so Save/Test retains the user gesture.
+  if (!await chrome.permissions.request(endpointPermission(values.endpoint))) {
+    throw new Error('Endpoint access was not granted. Settings were not changed.');
+  }
   if (values.prompt === DEFAULT_PROMPT) {
     delete values.prompt;
     await chrome.storage.local.remove('prompt');
@@ -43,8 +48,8 @@ async function init() {
     else el.value = s[f];
   }
   $('save').addEventListener('click', async () => {
-    await save();
-    status('Saved.');
+    try { await save(); status('Saved.'); }
+    catch (err) { status(err.message); }
   });
   $('resetPrompt').addEventListener('click', () => ($('prompt').value = DEFAULT_PROMPT));
   $('resetSeen').addEventListener('click', async () => {
@@ -52,14 +57,16 @@ async function init() {
     status('Forgot seen threads. The next scan re-baselines from whatever is listed.');
   });
   $('test').addEventListener('click', async () => {
-    await save();
-    status('Classifying…');
-    const [first, ...rest] = $('sample').value.split('\n');
-    const thread = /^from:/i.test(first)
-      ? { name: first.replace(/^from:\s*/i, ''), text: rest.join('\n') }
-      : { name: '', text: $('sample').value };
-    const res = await chrome.runtime.sendMessage({ type: 'classify', thread });
-    status(res.ok ? JSON.stringify(res.verdict) : `Error: ${res.error}`);
+    try {
+      await save();
+      status('Classifying…');
+      const [first, ...rest] = $('sample').value.split('\n');
+      const thread = /^from:/i.test(first)
+        ? { name: first.replace(/^from:\s*/i, ''), text: rest.join('\n') }
+        : { name: '', text: $('sample').value };
+      const res = await chrome.runtime.sendMessage({ type: 'classify', thread });
+      status(res.ok ? JSON.stringify(res.verdict) : `Error: ${res.error}`);
+    } catch (err) { status(err.message); }
   });
 }
 

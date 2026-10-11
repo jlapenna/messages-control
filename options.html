@@ -1,8 +1,8 @@
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Messages Spam Filter settings</title><link rel="stylesheet" href="style.css"><style>body { max-width: 640px; margin: 24px auto; padding: 0 16px; }</style></head>
+<head><meta charset="utf-8"><title>Messages Control settings</title><link rel="stylesheet" href="style.css"><style>body { max-width: 640px; margin: 24px auto; padding: 0 16px; }</style></head>
 <body>
-  <h1>Messages Spam Filter settings</h1>
+  <h1>Messages Control settings</h1>
   <label class="field">What to do with spam
     <select id="spamAction">
       <option value="block">Block &amp; report spam (moves it to Spam &amp; blocked; reports the number and recent texts to Google)</option>
@@ -10,15 +10,17 @@
     </select>
   </label>
   <label class="field">LLM endpoint (OpenAI-compatible chat completions)<input type="text" id="endpoint"></label>
+  <p class="muted">Save or Test asks Chrome to allow access to this endpoint's host. Message text and enabled pictures are sent there for classification. Use HTTPS for remote services.</p>
   <label class="field">Model<input type="text" id="model"></label>
-  <label class="field">API key (LiteLLM virtual key)<input type="password" id="apiKey" autocomplete="off"></label>
+  <label class="field">API key<input type="password" id="apiKey" autocomplete="off"></label>
   <label class="field">Delete when spam confidence ≥<input type="number" id="threshold" min="0.5" max="1" step="0.05"></label>
   <label class="field">Treat only the top N threads in the list as candidates<input type="number" id="topN" min="1" max="100"></label>
-  <label class="row"><input type="checkbox" id="skipNamedContacts"> Never classify threads whose name has no digits or "@" (saved contacts)</label>
+  <label class="row"><input type="checkbox" id="skipNamedContacts"> Skip threads whose displayed name has no digits or "@"</label>
+  <p class="muted">This is a name heuristic, not an address-book lookup. Names containing digits or an email address are not protected by this setting.</p>
   <label class="row"><input type="checkbox" id="openPictureThreads"> Open picture threads so the model can see the pictures</label>
   <p class="muted">Opening a thread marks it read: it loses its unread marker, and for RCS chats the sender gets a read receipt if you have those on (Messages settings → RCS chats → Send read receipts). Plain SMS/MMS sends no receipts. Turned off, picture threads are classified from their preview text only, which usually says just "Picture".</p>
   <label class="row"><input type="checkbox" id="archiveOldNotices"> Archive one-time codes after 6 hours and notices (order ready, delivered, driver arriving…) after a day</label>
-  <p class="muted">Archiving keeps the conversation (Messages → Archived) and brings it back when a new message arrives. Ages count from the latest message; for anything before today the list shows only the day, so it counts from the end of that day and never archives early. Applies even in dry run, which only forbids moving to trash.</p>
+  <p class="muted">Archiving keeps the conversation (Messages → Archived) and brings it back when a new message arrives. Ages count from the latest message; for anything before today the list shows only the day, so it counts from the end of that day and never archives early. Archiving applies even in dry run; dry run prevents blocking and trashing.</p>
   <label class="field">Classifier prompt<textarea id="prompt"></textarea></label>
   <div class="buttons">
     <button id="save">Save</button>
