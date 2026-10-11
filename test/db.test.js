@@ -41,10 +41,12 @@ test('event previews remain tied to the action after a newer verdict and a reope
   const db = new Db(file);
   const original = 'Original message '.repeat(50);
   db.recordEvent({ threadId: 'a', text: original, outcome: 'blocked & reported' });
+  db.recordEvent({ threadId: 'media', text: '', outcome: 'blocked & reported' });
   db.syncVerdicts({ a: { label: 'ok', text: 'A newer, different message' } });
   db.close();
   const reopened = new Db(file);
   assert.equal(reopened.event(1).text, original.slice(0, 500));
+  assert.equal(reopened.event(2).text, '', 'an empty media preview remains distinct from a missing snapshot');
   assert.equal(reopened.event(999), undefined);
   reopened.close();
 });

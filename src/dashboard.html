@@ -134,9 +134,10 @@
       $('message-when').textContent = new Date(e.time).toLocaleString();
       $('message-outcome').textContent = `${e.outcome || 'No outcome recorded'}${e.rule === 'review' || e.label === 'review' ? ' · manual action' : ''}`;
       $('message-reason').textContent = e.reason || 'No reason recorded.';
-      $('message-preview').textContent = e.text || 'No preview was saved for this event.';
+      const hasPreview = e.text != null;
+      $('message-preview').textContent = hasPreview ? (e.text || 'No text preview was present; this may be a photo, attachment or reaction. Open Google Messages to see it.') : 'No preview was saved for this event.';
       const kind = undoKind(e);
-      if (kind && e.text) {
+      if (kind && hasPreview) {
         $('message-undo').textContent = kind === 'block' ? 'Undo block' : 'Unarchive';
         $('message-undo').hidden = false;
         $('undo-explanation').textContent = kind === 'block' ? 'Undo block unblocks this sender or marks it as not spam in Google Messages.' : 'Unarchive restores this conversation from Archived.';
