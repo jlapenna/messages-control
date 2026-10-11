@@ -199,6 +199,10 @@ cd desktop && npm install && npm start          # development
 npm run dist                                    # desktop/dist/ (electron-builder)
 ```
 
+`npm run dist` produces `desktop/dist/linux-unpacked/` (about 285 MB: Electron
+plus the CLI, its dependencies and the dashboard under `resources/app/`);
+add a target such as `--linux AppImage` or `--win` for an installer.
+
 It expects Node and the repo's `node_modules` (`npm install` at the top
 level, `npx playwright install chromium`) beside it; `MESSAGES_CONTROL_NODE`
 points it at a specific node binary.
