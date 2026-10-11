@@ -27,13 +27,13 @@ npm ci
 echo "==> Regenerating git hooks"
 env -u HUSKY npx --no-install husky
 
-# `husky` points the shared core.hooksPath at .husky/_. When the repo-tools
-# package is installed, hand it back to the common-dir bootstrap so worktrees
-# made by a bare `git worktree add` (no install yet) still run their tracked
-# hooks. Guarded with command -v like the hooks themselves.
-if command -v repo-install-husky-hooks >/dev/null 2>&1; then
-  repo-install-husky-hooks
-fi
+# `husky` points the shared core.hooksPath at .husky/_. Hand it back to the
+# common-dir bootstrap so worktrees made by a bare `git worktree add` (no
+# install yet) still run their tracked hooks. @jlapenna/repo-tools is a
+# devDependency. Call the package file directly, not the node_modules/.bin
+# symlink: v1.5.3 finds its sibling run-husky-hook.sh via an unresolved
+# dirname "${BASH_SOURCE[0]}", which fails through the symlink.
+node_modules/@jlapenna/repo-tools/bin/install-husky-hooks.sh
 
 if [ ! -f .husky/_/h ]; then
   echo "ERROR: husky did not generate .husky/_/h." >&2
