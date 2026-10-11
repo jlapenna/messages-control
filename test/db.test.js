@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { Db } from '../src/db.js';
 
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'mc-db-')), 'state.db');
@@ -33,4 +34,32 @@ test('verdicts are mirrored with upserts', () => {
   ]);
   db.close();
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+});
+
+test('event previews remain tied to the action after a newer verdict and a reopen', () => {
+  const file = tmp();
+  const db = new Db(file);
+  const original = 'Original message '.repeat(50);
+  db.recordEvent({ threadId: 'a', text: original, outcome: 'blocked & reported' });
+  db.syncVerdicts({ a: { label: 'ok', text: 'A newer, different message' } });
+  db.close();
+  const reopened = new Db(file);
+  assert.equal(reopened.event(1).text, original.slice(0, 500));
+  assert.equal(reopened.event(999), undefined);
+  reopened.close();
+});
+
+test('opening an older database preserves its events and adds nullable previews', () => {
+  const file = tmp();
+  const old = new DatabaseSync(file);
+  old.exec(`create table events (id integer primary key, time integer not null,
+    label text, thread_id text, name text, outcome text, reason text, score real, rule text, method text);
+    insert into events (id, time, thread_id, outcome) values (7, 123, 'original', 'blocked & reported');`);
+  old.close();
+  const db = new Db(file);
+  assert.equal(db.event(7).thread_id, 'original');
+  assert.equal(db.event(7).text, null);
+  db.recordEvent({ threadId: 'new', text: 'New saved preview', outcome: 'kept' });
+  assert.equal(db.event(8).text, 'New saved preview');
+  db.close();
 });

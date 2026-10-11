@@ -8,7 +8,7 @@ import { timingSafeEqual } from 'node:crypto';
 //   GET  /healthz         200 when paired and the page answers, else 503 (no token)
 //   GET  /metrics         Prometheus text (no token)
 //   GET  /                the dashboard (asks for the token in the browser)
-//   GET  /api/status, /api/events?since&limit, /api/review, /api/policies, /api/verdicts
+//   GET  /api/status, /api/events?since&limit, /api/events/:id, /api/review, /api/policies, /api/verdicts
 //   POST /api/act {id, action}, /api/undo {event}, /api/scan {includeSeen, checkPictures, trashSpam, processAll}
 // /api/* needs "Authorization: Bearer <api.token>".
 const DASHBOARD = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dashboard.html');
@@ -82,13 +82,30 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
     if (!authorized(req)) return send(res, 401, { error: 'bearer token required (api.token in the config)' });
 
     if (req.method === 'GET') {
+      const eventMatch = /^\/api\/events\/(\d+)$/.exec(url.pathname);
+      if (eventMatch) {
+        const event = db.event(Number(eventMatch[1]));
+        if (!event) return send(res, 404, { error: 'event not found' });
+        let text = event.text;
+        // Older databases omitted previews. Recover only an unambiguous
+        // original log entry, never the thread's potentially newer verdict.
+        if (text == null) {
+          const { log = [] } = store.get('log');
+          const matches = log.filter((e) => e.threadId === event.thread_id &&
+            (e.name ?? null) === event.name && (e.label ?? null) === event.label &&
+            (e.rule ?? null) === event.rule && (e.outcome ?? null) === event.outcome &&
+            Math.abs((e.time ?? 0) - event.time) <= 1000);
+          if (matches.length === 1) text = matches[0].text == null ? null : String(matches[0].text).slice(0, 500);
+        }
+        return send(res, 200, { ...event, text: text ?? null });
+      }
       switch (url.pathname) {
         case '/api/status':
           return send(res, 200, await status());
         case '/api/events': {
           const since = Number(url.searchParams.get('since') ?? 0);
           const limit = Math.min(1000, Number(url.searchParams.get('limit') ?? 100));
-          return send(res, 200, db.events({ since, limit }).map((r) => ({ ...r })));
+          return send(res, 200, db.events({ since, limit }).map(({ text, ...r }) => r));
         }
         case '/api/review':
           return send(res, 200, review());

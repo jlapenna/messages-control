@@ -21,7 +21,7 @@
   table { width: 100%; border-collapse: collapse; table-layout: fixed; } th, td { text-align: left; padding: 6px 6px; border-top: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; } th { color: var(--muted); font-weight: 600; border-top: 0; }
   td.num { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
   td.reason { color: var(--muted); }
-  col.when { width: 9em; } col.name { width: 13em; } col.outcome { width: 17em; } col.actions { width: 5em; } col.acts4 { width: 17em; }
+  col.when { width: 9em; } col.name { width: 13em; } col.outcome { width: 17em; } col.actions { width: 9em; } col.acts4 { width: 17em; }
   button { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
   button:hover { border-color: var(--accent); } button.danger { color: var(--bad); } button:disabled { opacity: .5; cursor: default; }
   .actions { display: flex; gap: 6px; flex-wrap: wrap; }
@@ -29,7 +29,18 @@
   .label.spam, .label.error { color: var(--bad); } .label.marketing { color: #8250df; } .label.otp { color: var(--accent); } .label.notice, .label.review, .label.held { color: var(--warn); } .label.ok, .label.undo { color: var(--ok); }
   #token { width: 100%; max-width: 420px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
   .muted { color: var(--muted); } .err { color: var(--bad); }
+  dialog { width: min(620px, calc(100% - 32px)); max-height: 85vh; overflow: auto; padding: 20px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--fg); }
+  dialog::backdrop { background: #0008; }
+  dialog h2 { margin: 0 0 12px; font-size: 18px; }
+  dialog dl { display: grid; grid-template-columns: 5em 1fr; gap: 6px 12px; }
+  dialog dt { color: var(--muted); } dialog dd { margin: 0; overflow-wrap: anywhere; }
+  #message-preview { white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+  dialog a { color: var(--accent); }
   @media (max-width: 640px) { td.reason, th:nth-child(4), col.when { display: none; } }
+  @media (max-width: 640px) {
+    #events th:first-child, #events td:first-child { display: none; }
+    #events col.name { width: 27%; } #events col.outcome { width: auto; } #events col.actions { width: 6em; }
+  }
 </style>
 </head>
 <body>
@@ -65,6 +76,21 @@
     <div id="policies" class="muted">…</div>
   </section>
 </main>
+<dialog id="message-dialog" aria-labelledby="message-title">
+  <h2 id="message-title">Message details</h2>
+  <p id="message-status" class="muted" role="status"></p>
+  <dl>
+    <dt>Sender</dt><dd id="message-sender"></dd>
+    <dt>When</dt><dd id="message-when"></dd>
+    <dt>Outcome</dt><dd id="message-outcome"></dd>
+    <dt>Reason</dt><dd id="message-reason"></dd>
+  </dl>
+  <p class="muted">Saved message preview (up to 500 characters)</p>
+  <div id="message-preview"></div>
+  <p><a href="https://messages.google.com/web/" target="_blank" rel="noopener noreferrer">Open Google Messages</a> for the full conversation or attachments.</p>
+  <p id="undo-explanation" class="muted"></p>
+  <div class="actions"><button id="message-undo" hidden></button><button id="message-close">Close</button></div>
+</dialog>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -82,6 +108,49 @@
   const when = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const pct = (x) => x == null ? '' : `${Math.round(x * 100)}%`;
   const label = (l) => `<span class="label ${esc(l)}">${esc(l)}</span>`;
+  const eventOutcome = (e) => {
+    const manual = e.rule === 'review' || e.label === 'review';
+    const verdict = e.label === 'review' ? '' : `${label(e.label)} `;
+    const source = manual ? ' <span class="muted">· manual action</span>' : (e.rule ? ` <span class="muted">[${esc(e.rule)}]</span>` : '');
+    return `${verdict}${esc(e.outcome).slice(0, 60)}${source}`;
+  };
+  let selectedEvent = null;
+  let detailRequest = 0;
+  const undoKind = (e) => /^blocked/.test(e.outcome || '') ? 'block' : /^archived/.test(e.outcome || '') ? 'archive' : null;
+  async function viewMessage(id) {
+    const request = ++detailRequest;
+    selectedEvent = null;
+    for (const field of ['sender', 'when', 'outcome', 'reason', 'preview']) $(`message-${field}`).textContent = '';
+    $('message-undo').hidden = true;
+    $('undo-explanation').textContent = '';
+    $('message-status').textContent = 'Loading message…';
+    $('message-dialog').showModal();
+    try {
+      const e = await api(`/api/events/${id}`);
+      if (request !== detailRequest || !$('message-dialog').open) return;
+      selectedEvent = e;
+      $('message-status').textContent = '';
+      $('message-sender').textContent = e.name || 'Unknown sender';
+      $('message-when').textContent = new Date(e.time).toLocaleString();
+      $('message-outcome').textContent = `${e.outcome || 'No outcome recorded'}${e.rule === 'review' || e.label === 'review' ? ' · manual action' : ''}`;
+      $('message-reason').textContent = e.reason || 'No reason recorded.';
+      $('message-preview').textContent = e.text || 'No preview was saved for this event.';
+      const kind = undoKind(e);
+      if (kind && e.text) {
+        $('message-undo').textContent = kind === 'block' ? 'Undo block' : 'Unarchive';
+        $('message-undo').hidden = false;
+        $('undo-explanation').textContent = kind === 'block' ? 'Undo block unblocks this sender or marks it as not spam in Google Messages.' : 'Unarchive restores this conversation from Archived.';
+      } else if (kind) {
+        $('undo-explanation').textContent = 'Review and undo this action in Google Messages; there is no saved preview here.';
+      } else if (/^deleted/.test(e.outcome || '')) {
+        $('undo-explanation').textContent = 'Deleted conversations cannot be restored by Messages Control.';
+      }
+    } catch (err) {
+      if (request === detailRequest && $('message-dialog').open) $('message-status').textContent = `Could not load this message: ${err.message}`;
+    }
+  }
+  $('message-dialog').addEventListener('close', () => { ++detailRequest; selectedEvent = null; });
+  $('message-dialog').addEventListener('cancel', (ev) => { if ($('message-close').disabled) ev.preventDefault(); });
 
   async function load() {
     const [status, review, events, policies] = await Promise.all([api('/api/status'), api('/api/review'), api('/api/events?limit=60'), api('/api/policies')]);
@@ -99,8 +168,8 @@
       <td class="actions"><button data-act="keep">Keep</button><button data-act="archive">Archive</button><button data-act="block" class="danger">Block</button><button data-act="trash" class="danger">Trash</button></td></tr>`).join('')}</table>`
       : '<span class="muted">Nothing held for review.</span>';
     $('events').innerHTML = events.length ? `<table><colgroup><col class="when"><col class="name"><col class="outcome"><col><col class="actions"></colgroup><tr><th>When</th><th>Sender</th><th>Outcome</th><th>Reason</th><th></th></tr>${events.map((e) => `
-      <tr><td class="num">${when(e.time)}</td><td class="name">${esc(e.name || '')}</td><td class="outcome">${label(e.label)} ${esc(e.outcome).slice(0, 60)}${e.rule ? ` <span class="muted">[${esc(e.rule)}]</span>` : ''}</td><td class="reason">${esc(e.reason || '')}</td>
-      <td class="actions">${/^(blocked|archived)/.test(e.outcome || '') ? `<button data-undo="${e.id}">Undo</button>` : ''}</td></tr>`).join('')}</table>` : '<span class="muted">No events yet.</span>';
+      <tr><td class="num">${when(e.time)}</td><td class="name">${esc(e.name || '')}</td><td class="outcome">${eventOutcome(e)}</td><td class="reason">${esc(e.reason || '')}</td>
+      <td class="actions"><button data-view="${e.id}">View message</button></td></tr>`).join('')}</table>` : '<span class="muted">No events yet.</span>';
     $('policies').innerHTML = `<table><colgroup><col class="name"><col><col class="outcome"></colgroup><tr><th>Rule</th><th>Match</th><th>Action</th></tr>${policies.rules.map((r) => `<tr><td>${esc(r.name)}</td><td><code>${esc(JSON.stringify(r.match))}</code></td><td>${esc(r.action)}${r.hours ? ` ${r.hours} h` : ''}</td></tr>`).join('')}</table>
       <p class="muted">threshold ${policies.threshold} · ${policies.dryRun ? 'dry run: actions are logged, not taken' : 'live'}</p>`;
   }
@@ -113,10 +182,17 @@
         if (/^(block|trash)$/.test(b.dataset.act) && !confirm(`${b.dataset.act} this thread?`)) { busy(row, false); return; }
         await api('/api/act', { method: 'POST', body: JSON.stringify({ id: row.dataset.id, action: b.dataset.act }) });
         await load();
-      } else if (b.dataset.undo) {
-        busy(b.closest('tr'), true);
-        await api('/api/undo', { method: 'POST', body: JSON.stringify({ event: Number(b.dataset.undo) }) });
-        await load();
+      } else if (b.dataset.view) {
+        await viewMessage(Number(b.dataset.view));
+      } else if (b.id === 'message-close') {
+        $('message-dialog').close();
+      } else if (b.id === 'message-undo' && selectedEvent) {
+        b.disabled = true; $('message-close').disabled = true;
+        try {
+          await api('/api/undo', { method: 'POST', body: JSON.stringify({ event: selectedEvent.id }) });
+          $('message-dialog').close();
+          await load();
+        } finally { b.disabled = false; $('message-close').disabled = false; }
       } else if (b.id === 'scan') {
         b.disabled = true; b.textContent = 'Scanning…';
         const r = await api('/api/scan', { method: 'POST', body: '{}' });

@@ -101,6 +101,37 @@ test('status, events, review and policies', async () => {
   assert.ok(policies.rules.some((r) => r.name === 'spam-review'));
 });
 
+test('message details require authentication and show the action snapshot without page actions', async () => {
+  db.recordEvent({ threadId: 'detail', name: 'Sample sender', text: '<b>Original message</b>', outcome: 'blocked & reported', rule: 'review' });
+  const event = db.events({ limit: 1 })[0];
+  store.set({ verdicts: { ...store.get('verdicts').verdicts, detail: { label: 'ok', text: 'Newer message' } } });
+  const count = delivered.length;
+  assert.equal((await fetch(`${base}/api/events/${event.id}`)).status, 401);
+  assert.equal((await fetch(`${base}/api/events/9999`, { headers: auth })).status, 404);
+  const details = await (await fetch(`${base}/api/events/${event.id}`, { headers: auth })).json();
+  assert.equal(details.text, '<b>Original message</b>');
+  assert.equal(details.outcome, 'blocked & reported');
+  const list = await (await fetch(`${base}/api/events?limit=1`, { headers: auth })).json();
+  assert.equal(list[0].text, undefined, 'previews are fetched only when a message is viewed');
+  assert.equal(delivered.length, count, 'viewing saved details never opens or acts on the Google Messages page');
+});
+
+test('legacy details use only a matching original log preview, never a newer verdict', async () => {
+  const time = Date.now();
+  db.recordEvent({ time, threadId: 'legacy', name: 'Sample sender', label: 'review', rule: 'review', outcome: 'blocked & reported' });
+  const event = db.events({ limit: 1 })[0];
+  const original = { time: time - 1, threadId: 'legacy', name: 'Sample sender', label: 'review', rule: 'review', outcome: 'blocked & reported', text: 'Original log preview' };
+  store.set({ log: [original], verdicts: { ...store.get('verdicts').verdicts, legacy: { label: 'spam', text: 'Newer message' } } });
+  const detail = async () => (await fetch(`${base}/api/events/${event.id}`, { headers: auth })).json();
+  assert.equal((await detail()).text, 'Original log preview');
+  store.set({ log: [] });
+  assert.equal((await detail()).text, null, 'missing original evidence is shown as unavailable');
+  store.set({ log: [original, { ...original, text: 'Ambiguous second entry' }] });
+  assert.equal((await detail()).text, null, 'ambiguous log entries are not guessed');
+  store.set({ log: [{ ...original, time: time + 1001 }] });
+  assert.equal((await detail()).text, null, 'a different action time is not matched');
+});
+
 test('act, undo and scan go to the page; live follows dryRun', async () => {
   const post = (p, body) => fetch(`${base}${p}`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   assert.equal((await post('/api/act', { id: 't1' })).status, 400);
