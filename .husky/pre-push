@@ -2,9 +2,7 @@
 # fleet-onboard: managed by jlapenna/agent-lcars tools/fleet-onboard.mjs. Re-run it to refresh; delete this line to own the file locally.
 set -e
 
-# The public repo-tools worktree guard, guarded with command -v so a machine
-# without the package still commits and pushes.
+# The public repo-tools worktree guard. @jlapenna/repo-tools is a
+# devDependency, so Husky finds the command on node_modules/.bin.
 refs="$(cat)"
-if command -v repo-require-worktree >/dev/null 2>&1; then
-  printf '%s\n' "$refs" | repo-require-worktree pushes
-fi
+printf '%s\n' "$refs" | repo-require-worktree pushes
