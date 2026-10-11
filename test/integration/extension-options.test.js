@@ -67,6 +67,8 @@ test('endpoint permission approval is required before saving or sending a test m
     await page.getByText(/HTTP or HTTPS endpoint/).waitFor();
     assert.equal(await page.evaluate(() => fixture.stored.endpoint), 'http://localhost:8080/v1/chat/completions');
     assert.deepEqual(errors, []);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), 'settings should fit a narrow window');
     if (process.env.MC_QA_SCREENSHOTS === '1') await page.screenshot({ path: '/tmp/messages-control-extension-options.png', fullPage: true });
   } finally {
     await browser?.close();
