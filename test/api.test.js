@@ -21,7 +21,7 @@ const settings = { ...DEFAULTS, mode: 'full', dryRun: true, apiKey: 'k' };
 const delivered = [];
 let healthy = { ok: true, alive: true, paired: true };
 const server = await startApi({
-  settings, port: 0, token: 'secret-token', db, store,
+  settings, port: 0, token: 'secret-token', hosts: ['messages.example.test'], db, store,
   backend: { stats: { calls: 3, failures: 1, ms: 1500 } },
   health: async () => healthy,
   deliver: async (msg) => (delivered.push(msg), { ok: true, row: { outcome: 'done' }, summary: 'scanned' }),
@@ -72,6 +72,7 @@ test('a foreign Host header is refused (DNS rebinding)', async () => {
   assert.equal(await rawGet('/healthz', 'evil.example'), 421);
   assert.equal(await rawGet('/healthz', 'evil.example:7373'), 421);
   assert.equal(await rawGet('/healthz', 'localhost:9'), 200);
+  assert.equal(await rawGet('/healthz', 'Messages.Example.Test:443'), 200, 'a configured host is accepted');
   assert.equal(await rawGet('/healthz', '127.0.0.1'), 200);
   const page = await fetch(`${base}/`);
   assert.match(page.headers.get('content-security-policy'), /connect-src 'self'/);

@@ -600,7 +600,7 @@ async function main() {
       return { ok: alive && paired, alive, paired, pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) };
     };
     try {
-      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, db, store, backend, health, deliver, policy: loadPolicy() });
+      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, policy: loadPolicy() });
     } catch (err) {
       console.warn(`API not started (${err.message}); healthz and the dashboard are off.`);
     }
