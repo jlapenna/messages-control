@@ -4,3 +4,12 @@ node_modules
 test
 *.md
 !README.md
+desktop/node_modules
+desktop/dist
+.env
+.env.*
+config.json
+state.json
+state.db*
+profile
+pairing-emoji.png

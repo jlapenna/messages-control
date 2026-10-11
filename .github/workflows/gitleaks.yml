@@ -1,4 +1,4 @@
-# fleet-onboard: managed by jlapenna/agent-lcars tools/fleet-onboard.mjs. Re-run it to refresh; delete this line to own the file locally.
+# Repository-owned: scan full history for every event, including forks.
 name: gitleaks
 
 on:
@@ -26,7 +26,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_VERSION: '8.18.2'
+      - name: Install checksum-verified Gitleaks
+        run: |
+          set -euo pipefail
+          audit_dir="$(mktemp -d)"
+          curl --fail --silent --show-error --location https://github.com/gitleaks/gitleaks/releases/download/v8.18.2/gitleaks_8.18.2_linux_x64.tar.gz -o "$audit_dir/gitleaks.tar.gz"
+          echo '6298c9235dfc9278c14b28afd9b7fa4e6f4a289cb1974bd27949fc1e9122bdee  '"$audit_dir/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf "$audit_dir/gitleaks.tar.gz" -C "$audit_dir" gitleaks
+          echo "$audit_dir" >> "$GITHUB_PATH"
+      - name: Scan full Git history
+        run: ./tools/scan-secrets.sh
