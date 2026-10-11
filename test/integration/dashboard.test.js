@@ -26,6 +26,8 @@ test('view the original message before an explicit undo, without acting during r
     label: 'review', rule: 'review', outcome: 'archived (by you)' });
   db.recordEvent({ time: time - 2, threadId: 'old', name: 'Older sender',
     label: 'review', rule: 'review', outcome: 'blocked & reported' });
+  db.recordEvent({ time: time - 3, threadId: 'media', name: 'Media sender', text: '',
+    label: 'review', rule: 'review', outcome: 'blocked & reported' });
   store.set({ verdicts: { sample: { label: 'ok', text: 'A newer message, not the original.' } } });
   const delivered = [];
   const server = await startApi({
@@ -97,6 +99,14 @@ test('view the original message before an explicit undo, without acting during r
     assert.equal(delivered[0].type, 'undo');
     assert.equal(delivered[0].kind, 'blocked');
     assert.equal(delivered[0].threadId, 'sample');
+    await page.locator('[data-view="4"]').click();
+    await page.getByRole('button', { name: 'Undo block', exact: true }).waitFor();
+    assert.match(await page.locator('#message-preview').innerText(), /No text preview was present/);
+    assert.equal(delivered.length, 1, 'reviewing a media event is also read-only');
+    await page.getByRole('button', { name: 'Undo block', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('#message-dialog').open);
+    assert.equal(delivered.length, 2);
+    assert.equal(delivered[1].threadId, 'media', 'a saved empty preview still allows an explicit undo');
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
