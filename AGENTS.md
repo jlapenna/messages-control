@@ -58,3 +58,5 @@ Required checks on `main` are declared in `infra/github-ruleset/main.tf`
 and applied by the Homelab executor, never by hand in the GitHub UI.
 
 <!-- fleet-onboard:end -->
+
+In this repository the setup step is `./tools/setup-worktree.sh`.
