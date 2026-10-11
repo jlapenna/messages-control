@@ -659,16 +659,17 @@
   async function undo(msg) {
     const fn = { blocked: unblockThread, archived: unarchiveThread }[msg.kind];
     if (!fn) return { ok: false, error: `cannot undo "${msg.kind}"` };
+    const context = { threadId: msg.threadId, name: msg.name, text: msg.text ?? null, rule: 'undo' };
     try {
       const clicked = await fn(msg.name);
       if (msg.threadId) {
         await rememberVerdict(msg.threadId, { label: 'ok', byModel: true, score: 0, reason: `undone by you (${clicked})`, text: '', msgTime: null, time: Date.now(), version: VERDICT_VERSION });
       }
-      const r = { threadId: msg.threadId, name: msg.name, label: 'undo', outcome: clicked === 'Unarchive' ? 'unarchived' : clicked === 'Not spam' ? 'marked not spam' : 'unblocked', rule: 'undo' };
+      const r = { ...context, label: 'undo', outcome: clicked === 'Unarchive' ? 'unarchived' : clicked === 'Not spam' ? 'marked not spam' : 'unblocked' };
       await log(r);
       return { ok: true, row: r };
     } catch (err) {
-      const r = { threadId: msg.threadId, name: msg.name, label: 'error', outcome: `undo failed: ${err.message}`, rule: 'undo' };
+      const r = { ...context, label: 'error', outcome: `undo failed: ${err.message}` };
       await log(r);
       return { ok: false, error: err.message };
     }

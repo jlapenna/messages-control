@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
+import { eventDetails } from './event-details.js';
 
 // The watcher's local HTTP API, on 127.0.0.1 only.
 //   GET  /healthz         200 when paired and the page answers, else 503 (no token)
@@ -86,18 +87,7 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       if (eventMatch) {
         const event = db.event(Number(eventMatch[1]));
         if (!event) return send(res, 404, { error: 'event not found' });
-        let text = event.text;
-        // Older databases omitted previews. Recover only an unambiguous
-        // original log entry, never the thread's potentially newer verdict.
-        if (text == null) {
-          const { log = [] } = store.get('log');
-          const matches = log.filter((e) => e.threadId === event.thread_id &&
-            (e.name ?? null) === event.name && (e.label ?? null) === event.label &&
-            (e.rule ?? null) === event.rule && (e.outcome ?? null) === event.outcome &&
-            Math.abs((e.time ?? 0) - event.time) <= 1000);
-          if (matches.length === 1) text = matches[0].text == null ? null : String(matches[0].text).slice(0, 500);
-        }
-        return send(res, 200, { ...event, text: text ?? null });
+        return send(res, 200, eventDetails(db, store, event));
       }
       switch (url.pathname) {
         case '/api/status':
@@ -132,7 +122,8 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
           if (!event) return send(res, 404, { error: `no event ${body.event}` });
           const kind = /^blocked/.test(event.outcome ?? '') ? 'blocked' : /^archived/.test(event.outcome ?? '') ? 'archived' : null;
           if (!kind || !event.name) return send(res, 400, { error: `event ${event.id} ("${event.outcome}") cannot be undone` });
-          const r = await deliver({ type: 'undo', kind, name: event.name, threadId: event.thread_id });
+          const { text } = eventDetails(db, store, event);
+          const r = await deliver({ type: 'undo', kind, name: event.name, threadId: event.thread_id, text });
           return send(res, r?.ok ? 200 : 409, r ?? { ok: false, error: 'no answer from the page' });
         }
         case '/api/scan': {

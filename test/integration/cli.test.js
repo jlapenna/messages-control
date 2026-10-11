@@ -77,6 +77,8 @@ test('a block can be undone through the Spam & blocked dialog', async () => {
   assert.match(out, /unblocked|marked not spam/);
   assert.deepEqual(byId(mock.actions(), 't-scam').at(-1), 'unblock');
   assert.ok(mock.state().threads.find((t) => t.id === 't-scam' && !t.gone), 'the thread is back in the list');
+  const undo = events().find((e) => e.thread_id === 't-scam' && e.rule === 'undo');
+  assert.equal(undo.text, blocked.text, 'the result keeps the selected block preview after undo clears the verdict text');
 });
 
 test('act keeps a thread, and the next scan leaves it alone', async () => {
