@@ -50,7 +50,7 @@ skills in the public [jlapenna/repo-tools](https://github.com/jlapenna/repo-tool
 mirror their bodies locally; use the `repo-*` commands they describe. Keep
 the primary checkout clean on `main`, author in a linked worktree, and run
 this repository's own setup step in every new worktree before trusting its
-hooks. Fleet `fleet-*` commands come from the fleet-tools package in
+hooks (here, `./tools/setup-worktree.sh`). Fleet `fleet-*` commands come from the fleet-tools package in
 jlapenna/agent-lcars; hooks guard every invocation with `command -v`, so a
 machine without the package degrades quietly.
 
