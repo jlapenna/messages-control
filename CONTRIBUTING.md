@@ -3,8 +3,12 @@
 Use Node.js 24. Start with [AGENTS.md](AGENTS.md) and the linked development
 skill for source ownership, account authority and delivery conventions.
 Create a feature worktree from current `origin/main` and run
-`./tools/setup-worktree.sh` there. Hooks optionally use the public repo-tools
-worktree guard; that package is not required to build or test the app.
+`./tools/setup-worktree.sh` there. The setup installs the public repo-tools
+worktree guard required by the commit and push hooks.
+
+The root package narrowly overrides Nx 23.3.0's pinned `undici` dependency to
+the patched 7.29.1 release. Remove this override when the tooling no longer
+resolves the vulnerable version.
 
 Run `npm test`, then `npx playwright install chromium` and
 `npm run test:integration`. Integration tests use synthetic local messages,
