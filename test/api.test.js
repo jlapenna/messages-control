@@ -145,3 +145,14 @@ test('act, undo and scan go to the page; live follows dryRun', async () => {
   assert.equal(scan.summary, 'scanned');
   assert.deepEqual(delivered.at(-1), { type: 'scanNow', includeSeen: true, checkPictures: false, trashSpam: false, processAll: false });
 });
+
+test('undo carries the selected historical preview to the page for its audit result', async () => {
+  const time = Date.now();
+  db.recordEvent({ time, threadId: 'undo-context', name: 'Sample sender', label: 'review', rule: 'review', outcome: 'blocked & reported' });
+  const event = db.events({ limit: 1 })[0];
+  store.set({ log: [{ time, threadId: 'undo-context', name: 'Sample sender', label: 'review', rule: 'review', outcome: 'blocked & reported', text: 'Action preview' }],
+    verdicts: { 'undo-context': { label: 'ok', text: 'Newer message' } } });
+  const response = await fetch(`${base}/api/undo`, { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ event: event.id }) });
+  assert.equal(response.status, 200);
+  assert.equal(delivered.at(-1).text, 'Action preview');
+});

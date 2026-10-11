@@ -129,7 +129,7 @@
       const e = await api(`/api/events/${id}`);
       if (request !== detailRequest || !$('message-dialog').open) return;
       selectedEvent = e;
-      $('message-status').textContent = '';
+      $('message-status').textContent = e.previewSource ? `Preview from an earlier ${/^blocked/.test(e.previewSource.outcome) ? 'block' : 'archive'} on ${new Date(e.previewSource.time).toLocaleString()}. This old undo record did not save its own message.` : '';
       $('message-sender').textContent = e.name || 'Unknown sender';
       $('message-when').textContent = new Date(e.time).toLocaleString();
       $('message-outcome').textContent = `${e.outcome || 'No outcome recorded'}${e.rule === 'review' || e.label === 'review' ? ' · manual action' : ''}`;

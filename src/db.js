@@ -110,6 +110,14 @@ export class Db {
     return this.db.prepare('select * from events where id = ?').get(id);
   }
 
+  previousAction(event, kind) {
+    if (!event.thread_id || !event.name) return null;
+    return this.db.prepare(`select * from events where thread_id = ? and name = ? and id < ? and time <= ?
+      and (outcome like 'blocked%' or outcome like 'archived%')
+      and (? is null or outcome like ? || '%') order by time desc, id desc limit 1`)
+      .get(event.thread_id, event.name, event.id, event.time, kind, kind);
+  }
+
   // Outcome counts since a time, for status.
   counts(since) {
     const rows = this.db.prepare('select outcome, label, count(*) n from events where time >= ? group by outcome, label').all(since);

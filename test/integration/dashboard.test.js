@@ -28,6 +28,7 @@ test('view the original message before an explicit undo, without acting during r
     label: 'review', rule: 'review', outcome: 'blocked & reported' });
   db.recordEvent({ time: time - 3, threadId: 'media', name: 'Media sender', text: '',
     label: 'review', rule: 'review', outcome: 'blocked & reported' });
+  db.recordEvent({ time: time + 1, threadId: 'sample', name: 'Sample sender', label: 'undo', rule: 'undo', outcome: 'unblocked' });
   store.set({ verdicts: { sample: { label: 'ok', text: 'A newer message, not the original.' } } });
   const delivered = [];
   const server = await startApi({
@@ -36,7 +37,7 @@ test('view the original message before an explicit undo, without acting during r
     policy: globalThis.MessagesPolicy, log: () => {},
     deliver: async (msg) => {
       delivered.push(msg);
-      db.recordEvent({ time: Date.now() + 1000, threadId: msg.threadId, name: msg.name, label: 'undo', outcome: 'unblocked' });
+      db.recordEvent({ time: Date.now() + 1000, threadId: msg.threadId, name: msg.name, text: msg.text, label: 'undo', rule: 'undo', outcome: 'unblocked' });
       return { ok: true };
     },
   });
@@ -91,6 +92,12 @@ test('view the original message before an explicit undo, without acting during r
     assert.match(await page.locator('#undo-explanation').innerText(), /Google Messages/);
     assert.equal(delivered.length, 0);
     await page.getByRole('button', { name: 'Close', exact: true }).click();
+    await page.locator('[data-view="5"]').click();
+    await page.getByText(/Preview from an earlier block on/).waitFor();
+    assert.equal(await page.locator('#message-preview').innerText(), original);
+    assert.equal(await page.locator('#message-undo').isVisible(), false);
+    assert.equal(delivered.length, 0, 'recovering legacy undo context is read-only');
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.locator('[data-view="1"]').click();
     await page.getByRole('button', { name: 'Undo block', exact: true }).click();
@@ -99,6 +106,12 @@ test('view the original message before an explicit undo, without acting during r
     assert.equal(delivered[0].type, 'undo');
     assert.equal(delivered[0].kind, 'blocked');
     assert.equal(delivered[0].threadId, 'sample');
+    await page.locator('[data-view="6"]').click();
+    await page.waitForFunction(() => document.querySelector('#message-preview').textContent.startsWith('Original saved message.'));
+    assert.equal(await page.locator('#message-preview').innerText(), original);
+    assert.equal(await page.locator('#message-undo').isVisible(), false);
+    assert.equal(delivered.length, 1, 'viewing the new undo result retains its preview without another action');
+    await page.getByRole('button', { name: 'Close', exact: true }).click();
     await page.locator('[data-view="4"]').click();
     await page.getByRole('button', { name: 'Undo block', exact: true }).waitFor();
     assert.match(await page.locator('#message-preview').innerText(), /No text preview was present/);

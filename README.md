@@ -177,7 +177,11 @@ other `Host` headers are refused; `/api/*` keeps its token.
   Previews contain up to 500 characters from the conversation list, not the
   full conversation or attachments. Viewing them does not open the Google
   Messages conversation or change its read status. If an older event has no
-  saved preview, review and undo it in Google Messages instead.
+  saved preview, review and undo it in Google Messages instead. Undo results
+  and failures now retain the original action's preview. Older undo records
+  can show a dated earlier block/archive preview from the same conversation
+  as context; it is labeled because those records did not identify the exact
+  action reversed. The current verdict is never substituted for history.
 - `/api/status`, `/api/events?since&limit`, `/api/events/:id`, `/api/review`, `/api/policies`,
   `/api/verdicts`; `POST /api/act {id, action}`, `POST /api/undo {event}`,
   `POST /api/scan {includeSeen, checkPictures, trashSpam, processAll}` —

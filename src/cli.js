@@ -9,6 +9,7 @@ import { parseArgs } from 'node:util';
 import { CONFIG_FILE, STATE_DIR, loadSettings, readConfig, writeConfig } from './config.js';
 import { Store } from './store.js';
 import { Db } from './db.js';
+import { eventDetails } from './event-details.js';
 import { notify as sendNotification } from './notify.js';
 import { digestText, parseSince } from './digest.js';
 import { startApi } from './api.js';
@@ -556,7 +557,7 @@ async function main() {
     const kind = /^blocked/.test(event.outcome ?? '') ? 'blocked' : /^archived/.test(event.outcome ?? '') ? 'archived' : null;
     if (!kind) throw new Error(`event #${event.id} was "${event.outcome}": only blocks and archives can be undone (Messages for web has no trash view)`);
     if (!event.name) throw new Error(`event #${event.id} has no sender name to look up`);
-    undoMsg = { type: 'undo', kind, name: event.name, threadId: event.thread_id };
+    undoMsg = { type: 'undo', kind, name: event.name, threadId: event.thread_id, text: eventDetails(db, store, event).text };
   }
   const oneOff = {
     diagnose: { type: 'diagnose' },
