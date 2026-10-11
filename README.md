@@ -67,6 +67,7 @@ longer have a QR scanner.)
 | `log [--limit N]`, `clear-log` | the activity log |
 | `status` | config, pairing, last scan, actions in the last 24 h, service state |
 | `init`, `test-classifier` | write the config; send sample texts to the LLM |
+| `version` | print the package version and, from a git checkout, the short commit |
 | `install-service [--enable]`, `uninstall-service` | systemd user unit |
 
 Options: `--headed`, `--live`, `--mode spam|full`, `--state-dir DIR`.

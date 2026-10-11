@@ -15,6 +15,7 @@ import { startApi } from './api.js';
 import { randomBytes } from 'node:crypto';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
+import { versionText } from './version.js';
 import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, waitForState } from './pair.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,6 +45,7 @@ Commands (default: run)
   diagnose         print what the page driver can see
   log [--limit N]  print the activity log (newest first)
   clear-log        empty the activity log
+  version          print the package version and the git commit
   status           pairing, last scan, actions in the last 24 h, service state
   init             write the config file (endpoint, model, key, mode)
   test-classifier  send sample texts to the LLM and print the verdicts
@@ -84,7 +86,7 @@ To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
   'run', 'pair', 'scan', 'sweep', 'act-on-spam', 'check-pictures', 'diagnose', 'log', 'clear-log',
-  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo', 'send',
+  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo', 'send', 'version',
 ]);
 
 const { values: flags, positionals } = parseArgs({
@@ -371,6 +373,7 @@ async function main() {
     console.log(USAGE);
     process.exit(flags.help ? 0 : 2);
   }
+  if (command === 'version') return console.log(versionText(root));
   if (command === 'init') return init();
   if (command === 'install-service') return installService();
   if (command === 'uninstall-service') return uninstallService();
