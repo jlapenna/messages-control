@@ -171,9 +171,14 @@ other `Host` headers are refused; `/api/*` keeps its token.
   `messages_control_llm_failures_total`, `messages_control_llm_seconds_total`,
   `process_start_time_seconds`.
 - `/` — the dashboard: health, the last 24 hours, the review queue with
-  keep/archive/block/trash buttons, recent activity with undo, the rules in
-  force, a "Scan now" button.
-- `/api/status`, `/api/events?since&limit`, `/api/review`, `/api/policies`,
+  keep/archive/block/trash buttons, recent activity with "View message", the
+  rules in force, a "Scan now" button. View message shows the sender, action,
+  reason and saved preview before offering "Undo block" or "Unarchive".
+  Previews contain up to 500 characters from the conversation list, not the
+  full conversation or attachments. Viewing them does not open the Google
+  Messages conversation or change its read status. If an older event has no
+  saved preview, review and undo it in Google Messages instead.
+- `/api/status`, `/api/events?since&limit`, `/api/events/:id`, `/api/review`, `/api/policies`,
   `/api/verdicts`; `POST /api/act {id, action}`, `POST /api/undo {event}`,
   `POST /api/scan {includeSeen, checkPictures, trashSpam, processAll}` —
   all behind `Authorization: Bearer <api.token>`. The token is generated on

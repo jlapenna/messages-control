@@ -38,6 +38,11 @@ export class Db {
         text text
       );
     `);
+    // Keep the message preview with the action, even when a later verdict
+    // changes or the page's bounded activity log expires.
+    if (!this.db.prepare('pragma table_info(events)').all().some((c) => c.name === 'text')) {
+      this.db.exec('alter table events add column text text');
+    }
     // Added later: what a transactional message is about (JSON).
     try {
       this.db.exec('alter table verdicts add column extract text');
@@ -46,7 +51,7 @@ export class Db {
     }
     fs.chmodSync(file, 0o600);
     this.insertEvent = this.db.prepare(
-      'insert into events (time, label, thread_id, name, outcome, reason, score, rule, method) values (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'insert into events (time, label, thread_id, name, outcome, reason, score, rule, method, text) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
     this.upsertVerdict = this.db.prepare(`
       insert into verdicts (thread_id, label, score, reason, version, time, msg_time, media, text, extract)
@@ -69,6 +74,7 @@ export class Db {
       e.score ?? null,
       e.rule ?? null,
       e.method ?? null,
+      e.text == null ? null : String(e.text).slice(0, 500),
     );
   }
 
@@ -98,6 +104,10 @@ export class Db {
 
   events({ since = 0, limit = 50 } = {}) {
     return this.db.prepare('select * from events where time >= ? order by time desc, id desc limit ?').all(since, limit);
+  }
+
+  event(id) {
+    return this.db.prepare('select * from events where id = ?').get(id);
   }
 
   // Outcome counts since a time, for status.
