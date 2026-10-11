@@ -1,5 +1,13 @@
 # messages-control repository agent guide
 
+Messages Control keeps a Google Messages inbox clean: a Node-driven headless
+Chromium (or the same code loaded as a Chrome extension) watches
+messages.google.com, an OpenAI-compatible LLM classifies each new thread, and
+the rules in `policy.js` decide what happens to it. The surfaces that break
+users when they change are the Google Messages DOM selectors, the classifier's
+JSON answer, the config keys, the CLI commands, and the local API routes and
+metric names described in [README.md](README.md).
+
 Read [README.md](README.md) and the
 [messages-control-dev skill](.agents/skills/messages-control-dev/SKILL.md) before source changes.
 The skill maps code ownership, local checks, outcome evidence and operational
@@ -9,9 +17,17 @@ Use the shared
 and [land-pr](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/land-pr/SKILL.md)
 workflows for Git safety and publication.
 
-Keep this file a router. Repair the smallest authoritative source, document or
-skill when guidance is missing; retain current contracts separately from dated
-evidence. Load only the workflow relevant to the requested task.
+## Routes
+
+| Task | Start at | Proof |
+| --- | --- | --- |
+| Rules, backend, CLI, API, store, notifications | the skill's "Locate the contract" and the module list in README "Development" | `npm test` and `node --check`, as scoped in the skill's "Verify and report accurately" |
+| DOM selectors and the page driver | the skill's "Account authority" | `npm run test:integration` against the mock page, updating the mock when the elements it copies change; Google's real DOM only through `messages-control diagnose` or a headed journey, and only when an account is explicitly authorized; the unit tests do not reach the page |
+| Documentation and agent context | the skill's "Maintain the guidance" | every relative link resolves; skill frontmatter stays valid |
+| Container image | [image.yml](.github/workflows/image.yml) publishes to GHCR on pushes to `main` and `v*` tags; there is no separate release runbook | the Image workflow run for that commit |
+
+Keep this file a router. The skill's "Maintain the guidance" section says where
+a durable lesson belongs; put it there rather than here.
 
 Source maintenance does not authorize external account actions, hardware
 operations, installation, credentials, releases or deployments. The owning

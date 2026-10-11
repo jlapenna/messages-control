@@ -1,14 +1,15 @@
 ---
 name: messages-control-dev
-description: Develop Messages Control standalone and Chrome extension code, DOM selectors, classification policy, and repository documentation.
+description: Develop Messages Control's standalone runner and Chrome extension, its DOM selectors, classification policy and repository documentation. Use for any source, test, documentation or delivery work in this repository, including deciding which checks prove a change.
 ---
 
 # messages-control-dev
 
 Read [README.md](../../../README.md) for behavior and source ownership. Use a
-dedicated feature worktree from current `origin/main`. Run `npm ci` only when
-dependency installation is explicitly authorized or required by an applicable
-workflow. Documentation and syntax-only checks do not require installation.
+dedicated feature worktree from current `origin/main`. `npm test`,
+documentation and syntax checks need no dependency installation; run `npm ci`
+(which brings Playwright) only when a workflow needs the browser or an explicit
+request authorizes it.
 Read the shared
 [worktree-hygiene](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/worktree-hygiene/SKILL.md)
 and [land-pr](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/land-pr/SKILL.md)
@@ -17,26 +18,44 @@ workflows before Git mutation and publication.
 ## Locate the contract
 
 `messages-dom.js` owns DOM interaction. `content.js` owns thread detection and
-classification/action policy. `src/page-shim.js` adapts Chrome APIs for the
-standalone runner; `src/cli.js` owns injection. `src/backend.js` and
-`background.js` implement the two backends, and `settings.js` owns shared
-defaults. Persistent account state belongs to the private browser profile and
-`src/store.js`, never to source or fixtures.
+the classify → act flow; `policy.js` owns the rules that flow applies and is
+shared by the page, Node and the tests. `src/page-shim.js` adapts Chrome APIs
+for the standalone runner; `src/cli.js` owns the commands and injection.
+`src/backend.js` and `background.js` implement the two backends, and
+`settings.js` owns shared defaults. The other `src/` modules (API, event
+database, digest, notifications, config, pairing, browser) are listed with
+their jobs in README "Development"; keep that list the single inventory.
+Persistent account state belongs to the private browser profile, `state.json`
+and `state.db`, never to source or fixtures.
 
 ## Verify and report accurately
 
-Use `node --check` on changed JavaScript and parse changed JSON. The current
-`npm test` is a placeholder that fails; it supplies no automated behavioral
-coverage. State that gap instead of treating syntax checks as policy or DOM
-proof. A selector or adapter change needs an explicitly authorized account
-journey or a suitable synthetic fixture. Check standalone and extension paths
-separately before claiming parity. Do not add tests that only repeat prose.
+Use `node --check` on changed JavaScript and parse changed JSON. `npm test`
+runs `node --test` over `test/*.test.js` without installing anything: it proves
+the policy rules, the classifier answer parsing and failure counting in
+`src/backend.js`, the store, the SQLite event log, the notification channels,
+the digest and the local API against a fake page. `npm run
+test:integration` (needs `npm ci` and a Playwright Chromium) drives the real
+CLI, a headless Chromium and `messages-dom.js` against the mock page in
+`test/integration/mock/`: scan, block, STOP + trash, undo, keep and status,
+as README "Development" describes. CI
+([ci.yml](../../../.github/workflows/ci.yml)) runs both in the required
+`test` check after `node --check` on every script and a parse of
+`manifest.json`. None of that reaches Google's current DOM, the `content.js`
+flow in the real page, pairing or the extension as loaded in Chrome: say so
+instead of letting a green run stand for live DOM or account proof. A
+selector or adapter change needs an explicitly authorized account journey
+(`messages-control diagnose`, `--headed`) or a matching update to the mock
+page. Check standalone and extension paths separately before claiming
+parity. Do not add tests that only repeat prose.
 
 ## Account authority
 
-`run`, `sweep`, pairing, classifier calls and authenticated diagnostics involve
-an external account or provider. Do not invoke them for documentation checks.
-Dry run only prevents trashing: it can still archive notices and open picture
+`run`, `scan`, `sweep`, `act`, `undo`, pairing, classifier calls
+(`test-classifier` included), `digest --send` and authenticated diagnostics
+involve an external account or provider. Do not invoke them for documentation
+checks.
+Dry run only prevents blocking and trashing: it can still archive notices and open picture
 threads, marking them read and sending RCS receipts. Pairing, profile deletion,
 service installation and live message actions require the corresponding request.
 Keep keys, snippets, photos and profile credentials out of shared evidence.
