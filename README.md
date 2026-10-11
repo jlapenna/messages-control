@@ -157,7 +157,10 @@ daily.
 ## API, dashboard and monitoring
 
 While `run` is active it serves `http://127.0.0.1:7373/` (`api.bind`,
-`api.port` in the config; port 0 turns it off):
+`api.port` in the config; port 0 turns it off). To put the dashboard behind
+a reverse proxy, bind beyond loopback and list the names requests will
+carry — `"api": { "bind": "0.0.0.0", "hosts": ["messages.lan.example"] }` —
+other `Host` headers are refused; `/api/*` keeps its token.
 
 - `/healthz` — 200 when paired and the page answers, 503 otherwise. No token.
 - `/metrics` — Prometheus text, no token: `messages_control_healthy`,

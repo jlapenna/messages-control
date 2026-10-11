@@ -14,7 +14,7 @@ import { timingSafeEqual } from 'node:crypto';
 const DASHBOARD = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dashboard.html');
 const START = Date.now();
 
-export function startApi({ settings, bind = '127.0.0.1', port, token, db, store, backend, health, deliver, policy, log = console.log }) {
+export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = [], db, store, backend, health, deliver, policy, log = console.log }) {
   const server = http.createServer((req, res) => {
     handle(req, res).catch((err) => {
       send(res, 500, { error: err.message });
@@ -33,12 +33,14 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, db, store,
     res.end(data);
   };
 
-  // Only the loopback names reach this server legitimately; a browser sent
-  // here by DNS rebinding carries the attacker's Host and is refused.
-  const hosts = new Set([bind, '127.0.0.1', 'localhost', '[::1]']);
+  // Only names this server is meant to be reached by are accepted: loopback,
+  // the bind address, and api.hosts from the config (a reverse proxy's public
+  // name, the tailnet name). A browser sent here by DNS rebinding carries the
+  // attacker's Host and is refused.
+  const allowed = new Set([bind, '127.0.0.1', 'localhost', '[::1]', ...hosts.map((h) => String(h).toLowerCase())]);
   const hostOk = (req) => {
     const host = String(req.headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
-    return hosts.has(host);
+    return allowed.has(host);
   };
 
   const authorized = (req) => {

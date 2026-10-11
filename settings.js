@@ -136,7 +136,10 @@ export const DEFAULTS = {
   // Standalone only: the watcher's local API and dashboard (healthz and
   // metrics for monitoring). port 0 turns it off; the token is generated on
   // the first run and written to the config.
-  api: { bind: '127.0.0.1', port: 7373, token: '' },
+  // bind: 0.0.0.0 (or a tailnet address) to put it behind a reverse proxy;
+  // hosts: the extra names requests may carry then (the proxy's public name,
+  // the machine's tailnet name). /api/* stays behind the token either way.
+  api: { bind: '127.0.0.1', port: 7373, token: '', hosts: [] },
   prompt: DEFAULT_PROMPT,
 };
 
