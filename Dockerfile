@@ -3,7 +3,8 @@
 FROM mcr.microsoft.com/playwright:v1.64.0-noble
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+# No lifecycle scripts in the image: "prepare" runs husky, a dev dependency.
+RUN npm ci --omit=dev --ignore-scripts
 COPY . .
 ENV MESSAGES_CONTROL_STATE=/data
 VOLUME /data
