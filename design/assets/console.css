@@ -23,6 +23,8 @@
 
   /* classification + state colours */
   --c-spam: oklch(48% 0.19 27);       --c-spam-bg: oklch(95.5% 0.03 27);      --c-spam-bar: oklch(60% 0.19 27);   --c-spam-line: oklch(80% 0.08 27);
+  --c-marketing: oklch(48% 0.15 300);  --c-marketing-bg: oklch(95.5% 0.028 300); --c-marketing-bar: oklch(60% 0.14 300);
+  --c-transactional: oklch(44% 0.11 155); --c-transactional-bg: oklch(95% 0.03 155); --c-transactional-bar: oklch(58% 0.1 155);
   --c-otp: oklch(46% 0.14 258);       --c-otp-bg: oklch(95.5% 0.025 258);     --c-otp-bar: oklch(62% 0.13 258);
   --c-notice: oklch(42% 0.035 240);   --c-notice-bg: oklch(94.5% 0.01 240);   --c-notice-bar: oklch(64% 0.03 240);
   --c-important: oklch(42% 0.09 180); --c-important-bg: oklch(95% 0.03 180);  --c-important-bar: oklch(62% 0.09 180);
@@ -147,6 +149,8 @@ body[data-view="panel"] .rail { display: none; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; font-size: 12px; font-weight: 620; white-space: nowrap; }
 .chip i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .c-spam { color: var(--c-spam); background: var(--c-spam-bg); }
+.c-marketing { color: var(--c-marketing); background: var(--c-marketing-bg); }
+.c-transactional { color: var(--c-transactional); background: var(--c-transactional-bg); }
 .c-otp { color: var(--c-otp); background: var(--c-otp-bg); }
 .c-notice { color: var(--c-notice); background: var(--c-notice-bg); }
 .c-important { color: var(--c-important); background: var(--c-important-bg); }
@@ -194,6 +198,7 @@ body[data-view="panel"] .rail { display: none; }
 .meter-cut { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--fg); border-radius: 1px; transition: left .15s ease; }
 .f-spam { background: var(--c-spam-bar); } .f-otp { background: var(--c-otp-bar); } .f-notice { background: var(--c-notice-bar); }
 .f-important { background: var(--c-important-bar); } .f-unsure { background: var(--c-unsure-bar); } .f-pending { background: transparent; }
+.f-marketing { background: var(--c-marketing-bar); } .f-transactional { background: var(--c-transactional-bar); }
 .meter.big { height: 18px; margin: 22px 0 22px; }
 .meter.big .meter-track { top: 3px; bottom: 3px; }
 .meter-lab { position: absolute; font-family: var(--font-mono); font-size: 11px; color: var(--muted); white-space: nowrap; transform: translateX(-50%); }

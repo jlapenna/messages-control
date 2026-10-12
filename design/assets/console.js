@@ -18,8 +18,9 @@
     ['offline', 'Offline runner', 'No heartbeat; cached data only'],
   ];
   const CLS = {
-    spam: 'Spam', otp: 'One-time code', notice: 'Automated notice',
-    important: 'Important', unsure: 'Unsure', pending: 'Not classified', system: 'System',
+    spam: 'Spam', marketing: 'Marketing', otp: 'One-time code', notice: 'Automated notice',
+    transactional: 'Transactional', important: 'Important', unsure: 'Unsure',
+    pending: 'Not classified', system: 'System',
   };
   const ICONS = {
     check: '<path d="M3.5 8.5l3 3 6-7"/>',
@@ -100,8 +101,10 @@
     if (t.named && cfg.skipNamedContacts) return { cls: 'important', skipped: true };
     if (t.p >= cfg.threshold) return { cls: 'spam' };
     if (t.p >= 0.5) return { cls: 'unsure' };
+    if (t.marketing) return { cls: 'marketing' };
     if (t.otp) return { cls: 'otp' };
     if (t.notification) return { cls: 'notice' };
+    if (t.transactional) return { cls: 'transactional' };
     return { cls: 'important' };
   }
 
@@ -119,6 +122,11 @@
         if (mode === 'dry') return { key: trash ? 'trash' : 'block', text: trash ? 'Would trash' : 'Would block & report', done: false };
         return { key: trash ? 'trash' : 'block', text: `${trash ? 'Trashed' : 'Blocked & reported'} · ${when(t.at)}`, done: true, tone: 'spam' };
       }
+      case 'marketing':
+        if (mode === 'dry') return { key: 'trash', text: 'Would trash · never reported', done: false };
+        return { key: 'trash', text: `Trashed · not reported · ${when(t.at)}`, done: true, tone: 'spam' };
+      case 'transactional':
+        return { key: 'keep', text: 'Kept · in the digest', done: true };
       case 'otp':
       case 'notice': {
         if (!cfg.archiveOldNotices) return { key: 'label', text: 'Labelled · stays in inbox', done: true };
@@ -276,7 +284,7 @@
     const all = feedThreads();
     const counts = { all: all.length };
     all.forEach((t) => { const c = classify(t).cls; counts[c] = (counts[c] || 0) + 1; });
-    const filters = [['all', 'All'], ['unsure', 'Unsure'], ['spam', 'Spam'], ['otp', 'Codes'], ['notice', 'Notices'], ['important', 'Important']];
+    const filters = [['all', 'All'], ['unsure', 'Unsure'], ['spam', 'Spam'], ['marketing', 'Marketing'], ['otp', 'Codes'], ['notice', 'Notices'], ['transactional', 'Kept'], ['important', 'Important']];
     if (S.demo === 'error') filters.push(['pending', 'Not classified']);
     const unsaved = S.draft.threshold !== S.saved.threshold;
     const sweepDisabled = offline() || S.demo === 'loading' || S.sweeping;
@@ -455,13 +463,14 @@
     const otp = /\b\d{4,8}\b/.test(s) && /(code|password|verification|otp|passcode)/.test(s) && !link;
     const notification = /(ready for pickup|out for delivery|delivered|arriving|approaching|table is ready|session ended)/.test(s);
     const transactional = /(appointment|reminder|receipt|order #|payment due|reservation|confirm)/.test(s) && !link;
+    const marketing = /(20% off|% off|\bsale\b|coupon|clearance|loyalty|double points|text stop|opt out)/.test(s) && !link;
     let p = 0.08;
     [/unpaid|late fee|overdue|suspend/, /claim|prize|winner|free spins|gift card/, /crypto|btc|wallet/, /is this \w+\?/, /earn \$|per day|\/day/, /chip in|donate|deadline/, /verify (your )?account/].forEach((r) => { if (r.test(s)) p += 0.24; });
     if (link) p += 0.3;
-    if (otp || notification || transactional) p = Math.min(p, 0.05);
+    if (otp || notification || transactional || marketing) p = Math.min(p, 0.05);
     p = Math.round(Math.min(p, 0.98) * 100) / 100;
-    const reason = p >= 0.8 ? 'Pressure to act with a link or offer from an unknown sender.' : p >= 0.5 ? 'Some scam signals, but not conclusive.' : otp ? 'One-time code with no link.' : notification ? 'Short-lived status notice.' : transactional ? 'Something to keep or act on later.' : 'Reads as an ordinary personal message.';
-    return { spam_probability: p, marketing: false, otp, notification, transactional, extract: transactional ? { summary: text.slice(0, 40) } : {}, reason };
+    const reason = p >= 0.8 ? 'Pressure to act with a link or offer from an unknown sender.' : p >= 0.5 ? 'Some scam signals, but not conclusive.' : otp ? 'One-time code with no link.' : notification ? 'Short-lived status notice.' : marketing ? 'Real-business promo with a STOP footer; marketing, not spam.' : transactional ? 'Something to keep or act on later.' : 'Reads as an ordinary personal message.';
+    return { spam_probability: p, marketing, otp, notification, transactional, extract: transactional ? { summary: text.slice(0, 40) } : {}, reason };
   }
   function renderRunner() {
     const el = $('#view-runner');
@@ -476,8 +485,8 @@
       : S.demo === 'error' ? `<span class="state"><span class="dot"></span>Healthy · classifier failing</span>` : `<span class="state"><span class="dot"></span>Healthy</span>`;
     const dryCounts = {};
     feedThreads().forEach((t) => { const c = classify(t, S.saved, true).cls; dryCounts[c] = (dryCounts[c] || 0) + 1; });
-    const dryLabel = { spam: S.saved.spamAction === 'trash' ? 'would trash' : 'would block', otp: 'labelled', notice: 'labelled', important: 'left alone', unsure: 'held' };
-    const rows = ['spam', 'otp', 'notice', 'important', 'unsure'].map((k) => {
+    const dryLabel = { spam: S.saved.spamAction === 'trash' ? 'would trash' : 'would block', marketing: 'would trash', otp: 'labelled', notice: 'labelled', transactional: 'kept', important: 'left alone', unsure: 'held' };
+    const rows = ['spam', 'marketing', 'otp', 'notice', 'transactional', 'important', 'unsure'].map((k) => {
       const lv = D.lastLive.rows[k];
       return `<tr><td>${chip(k)}</td><td>${S.demo === 'error' && k !== 'important' ? '—' : dryCounts[k] || 0} <span class="hint">${dryLabel[k]}</span></td><td>${lv[0]} <span class="hint">${lv[1]}</span></td></tr>`;
     }).join('');
@@ -486,7 +495,7 @@
     if (ts && ts.loading) out = `<div class="parsed"><span class="spinner"></span>Waiting for <span class="mono">${esc(S.saved.model)}</span>…</div>`;
     else if (ts && ts.error) out = `<div class="banner error" style="margin:0">${ic('alert')}<div class="banner-text"><strong>401 Unauthorized</strong>The endpoint rejected the API key. No verdict.</div></div>`;
     else if (ts && ts.res) {
-      const fakeT = Object.assign({ p: ts.res.spam_probability }, ts.res);
+      const fakeT = Object.assign({ p: ts.res.spam_probability, at: NOW.toISOString() }, ts.res);
       const v = classify(fakeT, S.draft, true), a = actionFor(fakeT, v, S.draft, S.mode);
       out = `<div class="test-out"><pre class="json">${esc(JSON.stringify(ts.res, null, 2))}</pre>
         <div class="parsed"><span class="hint">Parsed →</span>${chip(v.cls)}<span class="mono">${pf(ts.res.spam_probability)}</span><span class="hint">at cut ${S.draft.threshold.toFixed(2)} →</span>${actHTML(a)}</div>
@@ -541,7 +550,7 @@
         <div class="ext-chrome"><span class="t"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>Messages Control</span>
           <button class="icon-btn" data-act="panel-close" aria-label="Close side panel">${ic('x')}</button></div>
         <div class="ext-head"><div class="row"><span class="mtag${S.mode === 'live' ? ' live' : ''}">${S.mode === 'live' ? 'LIVE' : 'DRY RUN'}</span><span class="hint">${list.length} threads · cut ${S.draft.threshold.toFixed(2)}</span></div></div>
-        <div class="ext-actions"><button class="btn btn-primary" data-act="sweep" ${S.demo === 'loading' || S.sweeping ? 'disabled' : ''} data-od-id="ext-sweep">${S.sweeping ? '<span class="spinner"></span>Sweeping' : 'Sweep'}</button>
+        <div class="ext-actions"><button class="btn btn-primary" data-act="ext-sweep" ${S.demo === 'loading' || S.sweeping ? 'disabled' : ''} data-od-id="ext-sweep">${S.sweeping ? '<span class="spinner"></span>Sweeping' : 'Sweep'}</button>
           <button class="btn" data-act="process-all" ${S.processing != null || S.demo === 'loading' ? 'disabled' : ''} data-od-id="ext-process-all">Process all</button>
           ${S.processing != null ? `<div class="progress" role="progressbar" aria-valuenow="${S.processing}" aria-valuemin="0" aria-valuemax="100"><span style="width:${S.processing}%"></span></div>` : ''}</div>
         ${note}<ul class="ext-list" aria-label="Thread verdicts">${rows}</ul>
@@ -627,8 +636,8 @@
     toast(m === 'live' ? 'Live mode on. Feed now shows executed actions.' : 'Dry run on. Feed shows what would happen.');
     render();
   }
-  function sweep() {
-    if (offline()) { toast('Runner offline: sweep not sent.', 'warn'); return; }
+  function sweep(fromPanel) {
+    if (offline() && !fromPanel) { toast('Runner offline: sweep not sent.', 'warn'); return; }
     if (S.sweeping) return;
     S.sweeping = true; renderView();
     setTimeout(() => {
@@ -746,6 +755,7 @@
     const act = (el = q('[data-act]')) && el.dataset.act;
     switch (act) {
       case 'sweep': return sweep();
+      case 'ext-sweep': return sweep(true);
       case 'retry':
         el.disabled = true; el.innerHTML = '<span class="spinner"></span>Retrying';
         return setTimeout(() => { toast('Retry sent: still 401 Unauthorized. Check apiKey in Settings.', 'warn'); renderChrome(); }, 800);

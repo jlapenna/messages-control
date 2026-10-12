@@ -47,6 +47,7 @@ window.MC_DATA = {
     { id: 't10', at: '2026-10-12T07:55', sender: '33733', snippet: '739104 is your Amazon one-time password. Do not share it.', p: 0.03, otp: true, reason: 'Genuine one-time password, no link.' },
     { id: 't11', at: '2026-10-12T07:40', sender: '+1 (346) 555-0108', snippet: 'Remote position available: earn $300-$500/day reviewing products from home. Reply YES to get started', p: 0.91, reason: 'Unsolicited job offer with implausible pay.' },
     { id: 't12', at: '2026-10-12T07:22', sender: '+1 (650) 555-0176', snippet: 'Reminder: dental cleaning Tue Oct 14 at 3:30 PM. Reply C to confirm or R to reschedule.', p: 0.02, transactional: true, extract: { summary: 'Dental cleaning', date: '2026-10-14' }, reason: 'Appointment reminder for a future date.' },
+    { id: 't18', at: '2026-10-12T07:15', sender: '+1 (510) 555-0198', snippet: 'Blue Bottle Oakland: 20% off all bags this weekend, loyalty points doubled! Text STOP to opt out.', p: 0.04, marketing: true, reason: 'Real-business promo with a STOP footer; marketing, not spam.' },
     { id: 't13', at: '2026-10-12T06:48', sender: '+1 (909) 555-0124', snippet: 'Your wallet received 0.42 BTC. Claim before it expires: btc-claim-portal.net/r/88213', p: 0.99, reason: 'Crypto claim scam with a link.' },
     { id: 't14', at: '2026-10-12T06:30', sender: '21354', snippet: 'Charging session ended at 6:29 AM. 18.4 kWh delivered. Please move your vehicle.', p: 0.02, notification: true, reason: 'Charging-session notice; nothing to keep.' },
     { id: 't15', at: '2026-10-12T05:10', sender: '+1 (415) 555-0142', snippet: 'FasTrak: You have an unpaid toll balance of $6.95. Pay now to avoid a $50 late fee: fastrak-pay.top', p: 0.95, reason: 'Fake toll notice on a .top domain.' },
@@ -91,8 +92,8 @@ window.MC_DATA = {
 
   lastLive: {
     at: '2026-10-11T21:05',
-    checked: 9,
-    rows: { spam: [4, 'blocked & reported'], otp: [1, 'archived'], notice: [1, 'archived'], important: [2, 'left alone'], unsure: [1, 'held'] },
+    checked: 11,
+    rows: { spam: [4, 'blocked & reported'], marketing: [1, 'trashed, not reported'], otp: [1, 'archived'], notice: [1, 'archived'], transactional: [1, 'kept · in digest'], important: [2, 'left alone'], unsure: [1, 'held'] },
   },
 
   samples: [
