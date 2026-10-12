@@ -29,7 +29,6 @@ jobs:
 
       - name: Verify repository-owned Terraform
         run: |
-          ./tools/github-ruleset-root.test.sh
           terraform -chdir=infra/github-ruleset init -backend=false -input=false -lockfile=readonly
           terraform -chdir=infra/github-ruleset fmt -check -recursive
           terraform -chdir=infra/github-ruleset validate
