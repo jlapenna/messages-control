@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Messages Control — triage console (prototype)</title>
+<link rel="stylesheet" href="assets/console.css">
+</head>
+<body data-view="feed" data-state="normal" data-mode="dry">
+
+<div class="topbar" id="topbar" data-od-id="topbar">
+  <header class="bar">
+    <div class="brand" data-od-id="brand">
+      <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+      <span>Messages Control</span>
+      <span class="brand-sub">triage console</span>
+    </div>
+    <span class="runner-pill" id="runnerPill" data-od-id="runner-pill"></span>
+    <span class="spacer"></span>
+    <div class="mode-wrap top" data-od-id="mode-switch-top">
+      <span class="seg-label">Mode</span>
+      <div class="seg mode" role="group" aria-label="Run mode" data-mode-switch></div>
+    </div>
+    <button class="btn btn-sm demo-btn" id="demoBtn" aria-expanded="false" aria-controls="demoPanel" data-od-id="demo-controls-button" title="Prototype demo controls">Demo</button>
+  </header>
+  <div class="tabbar">
+    <nav class="tabs" role="tablist" aria-label="Views" data-od-id="view-tabs">
+      <button class="tab" role="tab" data-view="feed" id="tab-feed" aria-controls="view-feed" data-od-id="tab-feed"><span class="long">Live feed</span><span class="short">Feed</span><span class="badge" id="feedBadge" title="Unsure threads held for review"></span></button>
+      <button class="tab" role="tab" data-view="log" id="tab-log" aria-controls="view-log" data-od-id="tab-log"><span class="long">Decision log</span><span class="short">Log</span></button>
+      <button class="tab" role="tab" data-view="settings" id="tab-settings" aria-controls="view-settings" data-od-id="tab-settings">Settings</button>
+      <button class="tab" role="tab" data-view="runner" id="tab-runner" aria-controls="view-runner" data-od-id="tab-runner"><span class="long">Runner status</span><span class="short">Runner</span></button>
+      <button class="tab ext" role="tab" data-view="panel" id="tab-panel" aria-controls="view-panel" data-od-id="tab-ext-panel"><span class="long">Extension side panel</span><span class="short">Panel</span></button>
+      <span class="tab-last" id="tabLast" aria-live="polite"></span>
+    </nav>
+  </div>
+</div>
+
+<div class="page">
+  <div id="modeStrip" data-od-id="mode-strip"></div>
+  <div id="bannerSlot"></div>
+  <main class="layout" id="layout">
+    <section class="view" id="view-feed" role="tabpanel" aria-labelledby="tab-feed" data-od-id="view-feed"></section>
+    <section class="view" id="view-log" role="tabpanel" aria-labelledby="tab-log" data-od-id="view-log" hidden></section>
+    <section class="view" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" data-od-id="view-settings" hidden></section>
+    <section class="view" id="view-runner" role="tabpanel" aria-labelledby="tab-runner" data-od-id="view-runner" hidden></section>
+    <section class="view" id="view-panel" role="tabpanel" aria-labelledby="tab-panel" data-od-id="view-ext-panel" hidden></section>
+    <aside class="rail" id="rail" aria-label="Context" data-od-id="context-rail"></aside>
+  </main>
+</div>
+<p class="proto-foot" data-od-id="prototype-footnote">Prototype · embedded mock data · no network requests · every action is simulated · press <kbd>?</kbd> for shortcuts</p>
+
+<div class="dock" id="dock" data-od-id="phone-dock">
+  <div class="seg mode" role="group" aria-label="Run mode" data-mode-switch></div>
+  <div class="last"><span class="lbl">Last action</span><span class="txt" id="dockLast"></span></div>
+</div>
+
+<div class="scrim sheet" id="sheet" hidden data-od-id="thread-sheet">
+  <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-head"><strong id="sheetTitle">Thread</strong><button class="icon-btn" data-close-sheet aria-label="Close"><svg class="ic" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg></button></div>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+
+<div class="scrim modal" id="modal" hidden>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle" id="modalCard"></div>
+</div>
+
+<div class="demo-panel" id="demoPanel" hidden data-od-id="demo-controls" role="dialog" aria-label="Prototype demo controls"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script src="assets/mock-data.js"></script>
+<script src="assets/console.js"></script>
+</body>
+</html>
