@@ -21,7 +21,7 @@ workflows for Git safety and publication.
 
 | Task | Start at | Proof |
 | --- | --- | --- |
-| Rules, backend, CLI, API, store, notifications | the skill's "Locate the contract" and the module list in README "Development" | `npm test` and `node --check`, as scoped in the skill's "Verify and report accurately" |
+| Rules, backend, CLI, API, store, notifications | the skill's "Locate the contract" and the module list in CONTRIBUTING "Source layout" | `npm test` and `node --check`, as scoped in the skill's "Verify and report accurately" |
 | DOM selectors and the page driver | the skill's "Account authority" | `npm run test:integration` against the mock page, updating the mock when the elements it copies change; Google's real DOM only through `messages-control diagnose` or a headed journey, and only when an account is explicitly authorized; the unit tests do not reach the page |
 | Documentation and agent context | the skill's "Maintain the guidance" | every relative link resolves; skill frontmatter stays valid |
 | Container image | [image.yml](.github/workflows/image.yml) publishes to GHCR on pushes to `main` and `v*` tags; there is no separate release runbook | the Image workflow run for that commit |

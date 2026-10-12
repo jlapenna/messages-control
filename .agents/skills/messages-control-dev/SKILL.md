@@ -24,7 +24,7 @@ for the standalone runner; `src/cli.js` owns the commands and injection.
 `src/backend.js` and `background.js` implement the two backends, and
 `settings.js` owns shared defaults. The other `src/` modules (API, event
 database, digest, notifications, config, pairing, browser) are listed with
-their jobs in README "Development"; keep that list the single inventory.
+their jobs in CONTRIBUTING "Source layout"; keep that list the single inventory.
 Persistent account state belongs to the private browser profile, `state.json`
 and `state.db`, never to source or fixtures.
 
@@ -38,7 +38,7 @@ the digest and the local API against a fake page. `npm run
 test:integration` (needs `npm ci` and a Playwright Chromium) drives the real
 CLI, a headless Chromium and `messages-dom.js` against the mock page in
 `test/integration/mock/`: scan, block, STOP + trash, undo, keep and status,
-as README "Development" describes. CI
+as CONTRIBUTING "Tests" describes. CI
 ([ci.yml](../../../.github/workflows/ci.yml)) runs both in the required
 `test` check after `node --check` on every script and a parse of
 `manifest.json`. None of that reaches Google's current DOM, the `content.js`
