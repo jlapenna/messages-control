@@ -412,9 +412,15 @@
     return true;
   }
 
+  // The conversation banner the list shows while an incoming MMS is still
+  // downloading, e.g. "Texting with (771) 888-0057 (SMS/MMS)". It is not the
+  // message: the real snippet ("Picture", or its text) replaces it later.
+  const isPlaceholderSnippet = (text) => /^Texting with .+\((SMS|MMS|RCS)[^)]*\)$/i.test(text.trim());
+
   // Snippets the list shows for picture/media messages.
   const isMediaSnippet = (text) =>
-    !text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text));
+    !isPlaceholderSnippet(text) &&
+    (!text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text)));
 
   const MESSAGES_SELECTOR = 'mws-messages-list, mws-message-list, [data-e2e-message-list]';
 
@@ -613,5 +619,5 @@
   const unblockThread = (name) => undoInDialog('Spam & blocked', name, /^(unblock|not spam)$/i);
   const unarchiveThread = (name) => undoInDialog('Archived', name, /^unarchive$/i);
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, isPlaceholderSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
 })();

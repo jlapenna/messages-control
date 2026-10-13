@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, isPlaceholderSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -193,7 +193,15 @@
     if (isSkippedContact(t, settings)) {
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
+    // An MMS still downloading shows a banner, not the message: classifying
+    // it would judge nothing. Unseen threads stay new until it loads.
+    if (isPlaceholderSnippet(t.text)) {
+      return { row: row(t, { label: 'pending', outcome: 'waiting for the message to finish loading' }), done: false };
+    }
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
+    // A new picture thread checked before its picture loaded gets another
+    // look as new, so a spam verdict can still act on it.
+    if (isNew && v?.media === 'picture not retrieved') v = null;
     if (!v && needsOpen(t) && !canOpen(isNew || recheck)) return { row: waitingRow(t), done: false };
     if (!v) {
       try {
@@ -207,6 +215,11 @@
       }
     }
     const { outcome, del, archive, trash, rule } = decide(v, { isNew, settings, thread: t });
+    if (isNew && !del && v.media === 'picture not retrieved') {
+      const n = (attempts.get(t.id) ?? 0) + 1;
+      attempts.set(t.id, n);
+      if (n < MAX_ATTEMPTS) return { row: fromVerdict(t, v, `${outcome}; picture not loaded, will check again (${n}/${MAX_ATTEMPTS})`, rule), done: false };
+    }
     if (!del && !archive) return { row: fromVerdict(t, v, outcome, rule), done: true };
 
     // Right before the trash, check again everything the decision rested on.
@@ -380,6 +393,7 @@
       const unlabelled = shown().filter(
         (t) =>
           !rows.has(t.id) &&
+          !isPlaceholderSnippet(t.text) &&
           !isSkippedContact(t, settings) &&
           (!cached(verdicts, t) || (checkPictures && needsOpen(t) && cached(verdicts, t).media === 'picture not retrieved')) &&
           (!needsOpen(t) || canOpen(false)) &&

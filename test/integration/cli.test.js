@@ -68,6 +68,10 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   const asked = mock.llm();
   assert.ok(!asked.some((q) => /YOU TOOOO/.test(q.text)));
   assert.equal(asked.find((q) => /Measure G/.test(q.text))?.pictures, 1);
+  // An MMS still downloading shows only a banner: it waits, unjudged and new.
+  assert.deepEqual(byId(acts, 't-mms-loading'), []);
+  assert.ok(!asked.some((q) => /Texting with|Measure Q/.test(q.text ?? '')));
+  assert.equal(outcome('t-mms-loading'), 'waiting for the message to finish loading');
 });
 
 test('a block can be undone through the Spam & blocked dialog', async () => {
