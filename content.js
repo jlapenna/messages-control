@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -16,6 +16,9 @@
   // labelling all of it would never settle once it outgrew VERDICT_LIMIT.
   const LABEL_SCOPE = 50;
   const attempts = new Map();
+  // New threads judged "not done" yet; they stay new even if newer
+  // arrivals push them below topN before the next look.
+  const retrying = new Set();
   let scanning = false;
   let rescan = false;
   // Options of requests that arrived while a scan was running, merged, and
@@ -120,13 +123,36 @@
   let openPictures = true; // refreshed from settings at the start of each scan
   const needsOpen = (t) => openPictures && isMediaSnippet(t.text);
 
-  async function classify(thread) {
+  // Thrown by classify() when the opened conversation holds no message yet:
+  // an incoming MMS still downloading shows only its "Texting with …" banner,
+  // which is not a message element. Nothing is sent to the classifier.
+  class NotLoaded extends Error {}
+
+  // Layouts of list rows whose conversation opened empty, kept to learn
+  // whether the row itself marks a loading MMS (rowShape strips the words).
+  async function saveRowShape(thread) {
+    try {
+      const { loadingRowShapes = [] } = await chrome.storage.local.get('loadingRowShapes');
+      if (loadingRowShapes.length >= 5) return;
+      await chrome.storage.local.set({ loadingRowShapes: [...loadingRowShapes, { time: Date.now(), shape: rowShape(thread.element) }] });
+    } catch (err) {
+      console.warn('[messages-control] could not save row shape', err);
+    }
+  }
+
+  async function classify(thread, { allowEmpty = false } = {}) {
     const payload = { name: thread.name, text: thread.text, media: isMediaSnippet(thread.text) };
     if (needsOpen(thread)) {
+      let read = null;
       try {
-        Object.assign(payload, await readThread(thread.id));
+        read = await readThread(thread.id);
+        Object.assign(payload, read);
       } catch (err) {
         console.warn('[messages-control] could not read thread', thread.id, err);
+      }
+      if (read && !read.texts.length && !read.images.length && !allowEmpty) {
+        await saveRowShape(thread);
+        throw new NotLoaded('nothing in the conversation yet');
       }
     }
     const { verdict } = await send({ type: 'classify', thread: payload });
@@ -194,11 +220,20 @@
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
+    // A new picture thread checked before its picture loaded gets another
+    // look as new, so a spam verdict can still act on it.
+    if (isNew && v?.media === 'picture not retrieved') v = null;
     if (!v && needsOpen(t) && !canOpen(isNew || recheck)) return { row: waitingRow(t), done: false };
     if (!v) {
       try {
-        v = await classify(t);
+        // The last look judges whatever is there, as before.
+        v = await classify(t, { allowEmpty: (attempts.get(t.id) ?? 0) + 1 >= MAX_ATTEMPTS });
       } catch (err) {
+        if (err instanceof NotLoaded) {
+          const n = (attempts.get(t.id) ?? 0) + 1;
+          attempts.set(t.id, n);
+          return { row: row(t, { label: 'pending', outcome: `waiting for the message to finish loading (${n}/${MAX_ATTEMPTS})` }), done: false };
+        }
         const n = (attempts.get(t.id) ?? 0) + 1;
         attempts.set(t.id, n);
         const done = n >= MAX_ATTEMPTS;
@@ -207,6 +242,11 @@
       }
     }
     const { outcome, del, archive, trash, rule } = decide(v, { isNew, settings, thread: t });
+    if (isNew && !del && v.media === 'picture not retrieved') {
+      const n = (attempts.get(t.id) ?? 0) + 1;
+      attempts.set(t.id, n);
+      if (n < MAX_ATTEMPTS) return { row: fromVerdict(t, v, `${outcome}; picture not loaded, will check again (${n}/${MAX_ATTEMPTS})`, rule), done: false };
+    }
     if (!del && !archive) return { row: fromVerdict(t, v, outcome, rule), done: true };
 
     // Right before the trash, check again everything the decision rested on.
@@ -329,7 +369,7 @@
         // top may have arrived during it.
         // (On a first run everything listed is history, so nothing is held back.)
         if (baselined) for (const t of all.slice(0, settings.topN)) if (!seen[t.id] && t.recent) maybeNew.add(t.id);
-        await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id)));
+        await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id) && !retrying.has(id)));
         if (complete) await chrome.storage.local.set({ fullSweep: SWEEP_VERSION });
         await log({
           label: 'info',
@@ -352,7 +392,16 @@
       // New threads arrive at the top. Unseen threads dated before today
       // lazy-loaded after the baseline; they are history, not new mail.
       const top = threads.slice(0, settings.topN);
-      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : top.filter((t) => !seen[t.id] && t.recent);
+      // Waiting threads and their look counts outlive a page reload or a
+      // one-off `scan`, so the third look still comes.
+      const { newRetries = {} } = await chrome.storage.local.get('newRetries');
+      for (const [id, n] of Object.entries(newRetries)) {
+        if (seen[id]) continue;
+        retrying.add(id);
+        attempts.set(id, Math.max(attempts.get(id) ?? 0, n));
+      }
+      const waiting = threads.filter((t) => retrying.has(t.id) && !seen[t.id] && !top.includes(t));
+      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : [...top.filter((t) => !seen[t.id] && t.recent), ...waiting];
       const stale = includeSeen ? [] : threads.filter((t) => !seen[t.id] && !fresh.includes(t));
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
@@ -367,10 +416,15 @@
         const res = await processThread(t, { isNew: true, settings, verdicts });
         rows.set(t.id, res.row);
         await log(res.row);
-        if (res.done) await markSeen([t.id]);
+        if (res.done) {
+          retrying.delete(t.id);
+          await markSeen([t.id]);
+        } else retrying.add(t.id);
         await publish('Checking new threads…');
         if (res.abort) break;
       }
+      for (const id of retrying) if (!threads.some((t) => t.id === id)) retrying.delete(id);
+      await chrome.storage.local.set({ newRetries: Object.fromEntries([...retrying].map((id) => [id, attempts.get(id) ?? 0])) });
 
       // Display-only labels for existing threads; decide() never deletes
       // them because isNew is false.

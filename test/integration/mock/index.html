@@ -153,6 +153,13 @@
       <button data-e2e-send-text-button aria-label="Send message">Send</button>`;
     const list = $('mws-messages-list', main);
     for (const m of t.messages) {
+      // A conversation banner ("Texting with … (SMS/MMS)"): not a message.
+      if (m.banner) {
+        const b = document.createElement('mws-tombstone-message-wrapper');
+        b.textContent = m.banner;
+        list.append(b);
+        continue;
+      }
       const w = document.createElement('mws-message-wrapper');
       w.setAttribute('is-outgoing', m.outgoing ? 'true' : 'false');
       if (m.image) w.innerHTML = `<div data-e2e-message-image><img alt=""></div>`;

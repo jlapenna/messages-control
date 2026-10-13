@@ -412,6 +412,24 @@
     return true;
   }
 
+  // A list row's layout with every word, name and number taken out: tags,
+  // classes, roles and true/false data-e2e-* flags; other values are blanked. Saved when a conversation opens
+  // with nothing in it yet, to learn whether the row marks a still-loading
+  // MMS without reading its text.
+  function rowShape(element) {
+    const clone = element.cloneNode(true);
+    const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.nodeValue.trim()) n.nodeValue = '\u2026';
+    for (const el of [clone, ...clone.querySelectorAll('*')]) {
+      for (const { name, value } of [...el.attributes]) {
+        if (name === 'class' || name === 'role') continue;
+        if (/^data-e2e-[\w-]*$/.test(name) && /^(true|false|)$/.test(value)) continue;
+        el.setAttribute(name, '\u2026');
+      }
+    }
+    return clone.outerHTML.replace(/\d/g, '#').slice(0, 4000);
+  }
+
   // Snippets the list shows for picture/media messages.
   const isMediaSnippet = (text) =>
     !text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text));
@@ -613,5 +631,5 @@
   const unblockThread = (name) => undoInDialog('Spam & blocked', name, /^(unblock|not spam)$/i);
   const unarchiveThread = (name) => undoInDialog('Archived', name, /^unarchive$/i);
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
 })();

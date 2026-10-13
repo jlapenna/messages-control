@@ -68,6 +68,16 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   const asked = mock.llm();
   assert.ok(!asked.some((q) => /YOU TOOOO/.test(q.text)));
   assert.equal(asked.find((q) => /Measure G/.test(q.text))?.pictures, 1);
+  // An MMS still downloading opens to a banner and no message: it waits,
+  // unjudged and still new, and its row's layout is saved without its words.
+  assert.deepEqual(byId(acts, 't-mms-loading'), []);
+  assert.ok(!asked.some((q) => /010-0399/.test(q.text ?? '')));
+  assert.equal(outcome('t-mms-loading'), 'waiting for the message to finish loading (1/3)');
+  const shapes = JSON.parse(fs.readFileSync(path.join(work, 'state', 'state.json'), 'utf8')).loadingRowShapes ?? [];
+  assert.equal(shapes.length, 1);
+  assert.ok(!/555|0399|Texting/.test(shapes[0].shape), 'no words or numbers in the saved layout');
+  // Text shaped like the banner is a message, judged as text.
+  assert.deepEqual(byId(acts, 't-fake-banner'), ['block_report']);
 });
 
 test('a block can be undone through the Spam & blocked dialog', async () => {
@@ -93,4 +103,14 @@ test('status describes the state', async () => {
   const out = await cli('status');
   assert.match(out, /mode full, live/);
   assert.match(out, /baseline:\s+done/);
+});
+
+test('a waiting MMS keeps its look count across scans and is judged on the third', async () => {
+  // Look 1 was the first scan, look 2 the scan after "keep"; each is its own process.
+  await cli('scan', '--live');
+  const looks = events().filter((e) => e.thread_id === 't-mms-loading').map((e) => e.outcome);
+  assert.ok(looks.includes('waiting for the message to finish loading (2/3)'), looks.join(' | '));
+  assert.ok(!/waiting/.test(looks[0]), `third look judges it: ${looks[0]}`);
+  const state = JSON.parse(fs.readFileSync(path.join(work, 'state', 'state.json'), 'utf8'));
+  assert.deepEqual(state.newRetries ?? {}, {});
 });

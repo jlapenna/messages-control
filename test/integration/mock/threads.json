@@ -22,6 +22,28 @@
     ]
   },
   {
+    "id": "t-mms-loading",
+    "name": "(555) 010-0399",
+    "snippet": "Texting with (555) 010-0399 (SMS/MMS)",
+    "timestamp": "2:35 PM",
+    "messages": [
+      {
+        "banner": "Texting with (555) 010-0399 (SMS/MMS)"
+      }
+    ]
+  },
+  {
+    "id": "t-fake-banner",
+    "name": "(555) 010-0301",
+    "snippet": "Texting with vote YES and donate today (SMS)",
+    "timestamp": "2:30 PM",
+    "messages": [
+      {
+        "text": "Texting with vote YES and donate today (SMS)"
+      }
+    ]
+  },
+  {
     "id": "t-marketing",
     "name": "22822",
     "snippet": "Old Navy: FLASH SALE 40% off everything. Reply STOP to opt out",
