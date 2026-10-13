@@ -419,7 +419,13 @@
   // by texting something shaped like it ("Texting with DONATE NOW (SMS)").
   const isPlaceholderSnippet = (text, name) => {
     const m = /^Texting with (.+) \((SMS|MMS|RCS)[^)]*\)$/i.exec(text.trim());
-    return !!m && !!name && m[1] === name.trim();
+    if (!m || !name) return false;
+    if (m[1] === name.trim()) return true;
+    // The same number can be formatted differently ("+1 771-888-0057" in
+    // the list, "(771) 888-0057" in the banner): compare the last 10 digits,
+    // and only when the banner holds nothing but a phone number.
+    const digits = (x) => x.replace(/\D/g, '').slice(-10);
+    return /^[\d\s()+.-]+$/.test(m[1]) && digits(m[1]).length >= 7 && digits(m[1]) === digits(name);
   };
 
   // Snippets the list shows for picture/media messages.
