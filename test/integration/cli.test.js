@@ -104,3 +104,13 @@ test('status describes the state', async () => {
   assert.match(out, /mode full, live/);
   assert.match(out, /baseline:\s+done/);
 });
+
+test('a waiting MMS keeps its look count across scans and is judged on the third', async () => {
+  // Look 1 was the first scan, look 2 the scan after "keep"; each is its own process.
+  await cli('scan', '--live');
+  const looks = events().filter((e) => e.thread_id === 't-mms-loading').map((e) => e.outcome);
+  assert.ok(looks.includes('waiting for the message to finish loading (2/3)'), looks.join(' | '));
+  assert.ok(!/waiting/.test(looks[0]), `third look judges it: ${looks[0]}`);
+  const state = JSON.parse(fs.readFileSync(path.join(work, 'state', 'state.json'), 'utf8'));
+  assert.deepEqual(state.newRetries ?? {}, {});
+});

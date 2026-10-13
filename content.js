@@ -392,6 +392,14 @@
       // New threads arrive at the top. Unseen threads dated before today
       // lazy-loaded after the baseline; they are history, not new mail.
       const top = threads.slice(0, settings.topN);
+      // Waiting threads and their look counts outlive a page reload or a
+      // one-off `scan`, so the third look still comes.
+      const { newRetries = {} } = await chrome.storage.local.get('newRetries');
+      for (const [id, n] of Object.entries(newRetries)) {
+        if (seen[id]) continue;
+        retrying.add(id);
+        attempts.set(id, Math.max(attempts.get(id) ?? 0, n));
+      }
       const waiting = threads.filter((t) => retrying.has(t.id) && !seen[t.id] && !top.includes(t));
       const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : [...top.filter((t) => !seen[t.id] && t.recent), ...waiting];
       const stale = includeSeen ? [] : threads.filter((t) => !seen[t.id] && !fresh.includes(t));
@@ -415,6 +423,8 @@
         await publish('Checking new threads…');
         if (res.abort) break;
       }
+      for (const id of retrying) if (!threads.some((t) => t.id === id)) retrying.delete(id);
+      await chrome.storage.local.set({ newRetries: Object.fromEntries([...retrying].map((id) => [id, attempts.get(id) ?? 0])) });
 
       // Display-only labels for existing threads; decide() never deletes
       // them because isNew is false.
