@@ -195,7 +195,7 @@
     }
     // An MMS still downloading shows a banner, not the message: classifying
     // it would judge nothing. Unseen threads stay new until it loads.
-    if (isPlaceholderSnippet(t.text)) {
+    if (isPlaceholderSnippet(t.text, t.name)) {
       return { row: row(t, { label: 'pending', outcome: 'waiting for the message to finish loading' }), done: false };
     }
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
@@ -393,7 +393,7 @@
       const unlabelled = shown().filter(
         (t) =>
           !rows.has(t.id) &&
-          !isPlaceholderSnippet(t.text) &&
+          !isPlaceholderSnippet(t.text, t.name) &&
           !isSkippedContact(t, settings) &&
           (!cached(verdicts, t) || (checkPictures && needsOpen(t) && cached(verdicts, t).media === 'picture not retrieved')) &&
           (!needsOpen(t) || canOpen(false)) &&

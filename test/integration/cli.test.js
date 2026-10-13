@@ -70,8 +70,10 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   assert.equal(asked.find((q) => /Measure G/.test(q.text))?.pictures, 1);
   // An MMS still downloading shows only a banner: it waits, unjudged and new.
   assert.deepEqual(byId(acts, 't-mms-loading'), []);
-  assert.ok(!asked.some((q) => /Texting with|Measure Q/.test(q.text ?? '')));
+  assert.ok(!asked.some((q) => /Texting with \(555\) 010-0300|Measure Q/.test(q.text ?? '')));
   assert.equal(outcome('t-mms-loading'), 'waiting for the message to finish loading');
+  // Text shaped like the banner but not naming the sender is judged as text.
+  assert.deepEqual(byId(acts, 't-fake-banner'), ['block_report']);
 });
 
 test('a block can be undone through the Spam & blocked dialog', async () => {

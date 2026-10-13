@@ -415,11 +415,16 @@
   // The conversation banner the list shows while an incoming MMS is still
   // downloading, e.g. "Texting with (771) 888-0057 (SMS/MMS)". It is not the
   // message: the real snippet ("Picture", or its text) replaces it later.
-  const isPlaceholderSnippet = (text) => /^Texting with .+\((SMS|MMS|RCS)[^)]*\)$/i.test(text.trim());
+  // It must name the thread's own sender, so a sender can't skip filtering
+  // by texting something shaped like it ("Texting with DONATE NOW (SMS)").
+  const isPlaceholderSnippet = (text, name) => {
+    const m = /^Texting with (.+) \((SMS|MMS|RCS)[^)]*\)$/i.exec(text.trim());
+    return !!m && !!name && m[1] === name.trim();
+  };
 
   // Snippets the list shows for picture/media messages.
   const isMediaSnippet = (text) =>
-    !isPlaceholderSnippet(text) &&
+    !/^Texting with .+ \((SMS|MMS|RCS)[^)]*\)$/i.test(text.trim()) &&
     (!text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text)));
 
   const MESSAGES_SELECTOR = 'mws-messages-list, mws-message-list, [data-e2e-message-list]';
