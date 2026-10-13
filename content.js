@@ -16,6 +16,9 @@
   // labelling all of it would never settle once it outgrew VERDICT_LIMIT.
   const LABEL_SCOPE = 50;
   const attempts = new Map();
+  // New threads judged "not done" yet; they stay new even if newer
+  // arrivals push them below topN before the next look.
+  const retrying = new Set();
   let scanning = false;
   let rescan = false;
   // Options of requests that arrived while a scan was running, merged, and
@@ -366,7 +369,7 @@
         // top may have arrived during it.
         // (On a first run everything listed is history, so nothing is held back.)
         if (baselined) for (const t of all.slice(0, settings.topN)) if (!seen[t.id] && t.recent) maybeNew.add(t.id);
-        await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id)));
+        await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id) && !retrying.has(id)));
         if (complete) await chrome.storage.local.set({ fullSweep: SWEEP_VERSION });
         await log({
           label: 'info',
@@ -389,7 +392,8 @@
       // New threads arrive at the top. Unseen threads dated before today
       // lazy-loaded after the baseline; they are history, not new mail.
       const top = threads.slice(0, settings.topN);
-      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : top.filter((t) => !seen[t.id] && t.recent);
+      const waiting = threads.filter((t) => retrying.has(t.id) && !seen[t.id] && !top.includes(t));
+      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : [...top.filter((t) => !seen[t.id] && t.recent), ...waiting];
       const stale = includeSeen ? [] : threads.filter((t) => !seen[t.id] && !fresh.includes(t));
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
@@ -404,7 +408,10 @@
         const res = await processThread(t, { isNew: true, settings, verdicts });
         rows.set(t.id, res.row);
         await log(res.row);
-        if (res.done) await markSeen([t.id]);
+        if (res.done) {
+          retrying.delete(t.id);
+          await markSeen([t.id]);
+        } else retrying.add(t.id);
         await publish('Checking new threads…');
         if (res.abort) break;
       }
