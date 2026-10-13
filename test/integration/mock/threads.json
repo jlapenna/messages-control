@@ -23,12 +23,12 @@
   },
   {
     "id": "t-mms-loading",
-    "name": "(555) 010-0300",
-    "snippet": "Texting with (555) 010-0300 (SMS/MMS)",
+    "name": "(555) 010-0399",
+    "snippet": "Texting with (555) 010-0399 (SMS/MMS)",
     "timestamp": "2:35 PM",
     "messages": [
       {
-        "text": "Chip in $5 now to defeat Measure Q: donate.example"
+        "banner": "Texting with (555) 010-0399 (SMS/MMS)"
       }
     ]
   },

@@ -412,26 +412,27 @@
     return true;
   }
 
-  // The conversation banner the list shows while an incoming MMS is still
-  // downloading, e.g. "Texting with (771) 888-0057 (SMS/MMS)". It is not the
-  // message: the real snippet ("Picture", or its text) replaces it later.
-  // It must name the thread's own sender, so a sender can't skip filtering
-  // by texting something shaped like it ("Texting with DONATE NOW (SMS)").
-  const isPlaceholderSnippet = (text, name) => {
-    const m = /^Texting with (.+) \((SMS|MMS|RCS)[^)]*\)$/i.exec(text.trim());
-    if (!m || !name) return false;
-    if (m[1] === name.trim()) return true;
-    // The same number can be formatted differently ("+1 771-888-0057" in
-    // the list, "(771) 888-0057" in the banner): compare the last 10 digits,
-    // and only when the banner holds nothing but a phone number.
-    const digits = (x) => x.replace(/\D/g, '').slice(-10);
-    return /^[\d\s()+.-]+$/.test(m[1]) && digits(m[1]).length >= 7 && digits(m[1]) === digits(name);
-  };
+  // A list row's layout with every word, name and number taken out: tags,
+  // classes, roles and true/false data-e2e-* flags; other values are blanked. Saved when a conversation opens
+  // with nothing in it yet, to learn whether the row marks a still-loading
+  // MMS without reading its text.
+  function rowShape(element) {
+    const clone = element.cloneNode(true);
+    const walker = document.createTreeWalker(clone, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.nodeValue.trim()) n.nodeValue = '\u2026';
+    for (const el of [clone, ...clone.querySelectorAll('*')]) {
+      for (const { name, value } of [...el.attributes]) {
+        if (name === 'class' || name === 'role') continue;
+        if (/^data-e2e-[\w-]*$/.test(name) && /^(true|false|)$/.test(value)) continue;
+        el.setAttribute(name, '\u2026');
+      }
+    }
+    return clone.outerHTML.replace(/\d/g, '#').slice(0, 4000);
+  }
 
   // Snippets the list shows for picture/media messages.
   const isMediaSnippet = (text) =>
-    !/^Texting with .+ \((SMS|MMS|RCS)[^)]*\)$/i.test(text.trim()) &&
-    (!text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text)));
+    !text.trim() || (text.length < 40 && /\b(photo|picture|image|video|gif|sticker|attachment|mms)s?\b/i.test(text));
 
   const MESSAGES_SELECTOR = 'mws-messages-list, mws-message-list, [data-e2e-message-list]';
 
@@ -630,5 +631,5 @@
   const unblockThread = (name) => undoInDialog('Spam & blocked', name, /^(unblock|not spam)$/i);
   const unarchiveThread = (name) => undoInDialog('Archived', name, /^unarchive$/i);
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, isPlaceholderSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
 })();

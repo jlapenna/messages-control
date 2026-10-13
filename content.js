@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, isPlaceholderSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -120,13 +120,36 @@
   let openPictures = true; // refreshed from settings at the start of each scan
   const needsOpen = (t) => openPictures && isMediaSnippet(t.text);
 
-  async function classify(thread) {
+  // Thrown by classify() when the opened conversation holds no message yet:
+  // an incoming MMS still downloading shows only its "Texting with …" banner,
+  // which is not a message element. Nothing is sent to the classifier.
+  class NotLoaded extends Error {}
+
+  // Layouts of list rows whose conversation opened empty, kept to learn
+  // whether the row itself marks a loading MMS (rowShape strips the words).
+  async function saveRowShape(thread) {
+    try {
+      const { loadingRowShapes = [] } = await chrome.storage.local.get('loadingRowShapes');
+      if (loadingRowShapes.length >= 5) return;
+      await chrome.storage.local.set({ loadingRowShapes: [...loadingRowShapes, { time: Date.now(), shape: rowShape(thread.element) }] });
+    } catch (err) {
+      console.warn('[messages-control] could not save row shape', err);
+    }
+  }
+
+  async function classify(thread, { allowEmpty = false } = {}) {
     const payload = { name: thread.name, text: thread.text, media: isMediaSnippet(thread.text) };
     if (needsOpen(thread)) {
+      let read = null;
       try {
-        Object.assign(payload, await readThread(thread.id));
+        read = await readThread(thread.id);
+        Object.assign(payload, read);
       } catch (err) {
         console.warn('[messages-control] could not read thread', thread.id, err);
+      }
+      if (read && !read.texts.length && !read.images.length && !allowEmpty) {
+        await saveRowShape(thread);
+        throw new NotLoaded('nothing in the conversation yet');
       }
     }
     const { verdict } = await send({ type: 'classify', thread: payload });
@@ -193,11 +216,6 @@
     if (isSkippedContact(t, settings)) {
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
-    // An MMS still downloading shows a banner, not the message: classifying
-    // it would judge nothing. Unseen threads stay new until it loads.
-    if (isPlaceholderSnippet(t.text, t.name)) {
-      return { row: row(t, { label: 'pending', outcome: 'waiting for the message to finish loading' }), done: false };
-    }
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
     // A new picture thread checked before its picture loaded gets another
     // look as new, so a spam verdict can still act on it.
@@ -205,8 +223,14 @@
     if (!v && needsOpen(t) && !canOpen(isNew || recheck)) return { row: waitingRow(t), done: false };
     if (!v) {
       try {
-        v = await classify(t);
+        // The last look judges whatever is there, as before.
+        v = await classify(t, { allowEmpty: (attempts.get(t.id) ?? 0) + 1 >= MAX_ATTEMPTS });
       } catch (err) {
+        if (err instanceof NotLoaded) {
+          const n = (attempts.get(t.id) ?? 0) + 1;
+          attempts.set(t.id, n);
+          return { row: row(t, { label: 'pending', outcome: `waiting for the message to finish loading (${n}/${MAX_ATTEMPTS})` }), done: false };
+        }
         const n = (attempts.get(t.id) ?? 0) + 1;
         attempts.set(t.id, n);
         const done = n >= MAX_ATTEMPTS;
@@ -393,7 +417,6 @@
       const unlabelled = shown().filter(
         (t) =>
           !rows.has(t.id) &&
-          !isPlaceholderSnippet(t.text, t.name) &&
           !isSkippedContact(t, settings) &&
           (!cached(verdicts, t) || (checkPictures && needsOpen(t) && cached(verdicts, t).media === 'picture not retrieved')) &&
           (!needsOpen(t) || canOpen(false)) &&
