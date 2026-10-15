@@ -1,6 +1,6 @@
 # Self-contained image: Chromium comes with the Playwright base image.
 # docker build -t messages-control . && docker run -it -v messages-control:/data messages-control init
-FROM mcr.microsoft.com/playwright:v1.64.0-noble
+FROM mcr.microsoft.com/playwright:v1.64.1-noble
 WORKDIR /app
 COPY package.json package-lock.json ./
 # No lifecycle scripts in the image: "prepare" runs husky, a dev dependency.
