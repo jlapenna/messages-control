@@ -8,6 +8,9 @@
   // the verdicts it just made for the newest threads.
   const VERDICT_LIMIT = 5000;
   const MAX_ATTEMPTS = 3;
+  // Earlier previews of a new thread kept for its next judgment.
+  const MAX_EARLIER = 4;
+  const EARLIER_CHARS = 500;
   // Existing threads labelled per scan, after new ones, so labelling a long
   // backlog never delays new mail.
   const LABEL_BATCH = 5;
@@ -140,8 +143,12 @@
     }
   }
 
-  async function classify(thread, { allowEmpty = false } = {}) {
+  async function classify(thread, { allowEmpty = false, earlier = [] } = {}) {
     const payload = { name: thread.name, text: thread.text, media: isMediaSnippet(thread.text) };
+    // The list shows only the latest message; a harmless follow-up must not
+    // hide the pitch before it, so earlier previews ride along.
+    // Each is capped so the current preview stays inside the classifier's 4,000 characters.
+    if (earlier.length) payload.texts = [...earlier.map((x) => x.slice(0, EARLIER_CHARS)), thread.text];
     if (needsOpen(thread)) {
       let read = null;
       try {
@@ -178,6 +185,7 @@
       reason: verdict.reason,
       extract: verdict.extract ?? undefined,
       text: thread.text,
+      texts: payload.texts && !needsOpen(thread) ? payload.texts.slice(-MAX_EARLIER - 1) : undefined,
       msgTime: thread.msgTime,
       media: payload.media
         ? verdict.pictures
@@ -225,9 +233,13 @@
     if (isNew && v?.media === 'picture not retrieved') v = null;
     if (!v && needsOpen(t) && !canOpen(isNew || recheck)) return { row: waitingRow(t), done: false };
     if (!v) {
+      // A new text thread whose preview changed since it was judged (a second
+      // message arrived) is judged on the earlier previews too.
+      const prev = isNew && !needsOpen(t) ? verdicts[t.id] : null;
+      const earlier = prev && prev.text !== t.text ? (prev.texts ?? [prev.text]).filter((x) => x && x !== t.text).slice(-MAX_EARLIER) : [];
       try {
         // The last look judges whatever is there, as before.
-        v = await classify(t, { allowEmpty: (attempts.get(t.id) ?? 0) + 1 >= MAX_ATTEMPTS });
+        v = await classify(t, { allowEmpty: (attempts.get(t.id) ?? 0) + 1 >= MAX_ATTEMPTS, earlier });
       } catch (err) {
         if (err instanceof NotLoaded) {
           const n = (attempts.get(t.id) ?? 0) + 1;
