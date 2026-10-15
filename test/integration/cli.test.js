@@ -114,3 +114,18 @@ test('a waiting MMS keeps its look count across scans and is judged on the third
   const state = JSON.parse(fs.readFileSync(path.join(work, 'state', 'state.json'), 'utf8'));
   assert.deepEqual(state.newRetries ?? {}, {});
 });
+
+test('a harmless follow-up does not hide the pitch before it', async () => {
+  // The first preview was judged spam, then a second message replaced the
+  // preview before the block went through (the thread stays new).
+  const file = path.join(work, 'state', 'state.json');
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+  data.verdicts['t-followup'] = { label: 'spam', byModel: true, score: 0.97, reason: 'scam', text: 'Claim now: your prize is waiting', time: Date.now(), version: 7 };
+  fs.writeFileSync(file, JSON.stringify(data));
+  const followUp = 'When would you be available for a quick call?';
+  mock.reset([...threads, { id: 't-followup', name: '(555) 010-0777', snippet: followUp, timestamp: '3:20 PM', messages: [{ text: 'Claim now: your prize is waiting' }, { text: followUp }] }]);
+  await cli('scan', '--live');
+  assert.deepEqual(byId(mock.actions(), 't-followup'), ['block_report']);
+  const asked = mock.llm().find((q) => q.text.includes(followUp));
+  assert.match(asked?.text ?? '', /Claim now/, 'the earlier preview reached the classifier');
+});
