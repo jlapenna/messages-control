@@ -10,6 +10,7 @@
   const MAX_ATTEMPTS = 3;
   // Earlier previews of a new thread kept for its next judgment.
   const MAX_EARLIER = 4;
+  const EARLIER_CHARS = 500;
   // Existing threads labelled per scan, after new ones, so labelling a long
   // backlog never delays new mail.
   const LABEL_BATCH = 5;
@@ -146,7 +147,8 @@
     const payload = { name: thread.name, text: thread.text, media: isMediaSnippet(thread.text) };
     // The list shows only the latest message; a harmless follow-up must not
     // hide the pitch before it, so earlier previews ride along.
-    if (earlier.length) payload.texts = [...earlier, thread.text];
+    // Each is capped so the current preview stays inside the classifier's 4,000 characters.
+    if (earlier.length) payload.texts = [...earlier.map((x) => x.slice(0, EARLIER_CHARS)), thread.text];
     if (needsOpen(thread)) {
       let read = null;
       try {
