@@ -194,7 +194,8 @@ test('sends that arrive together go out one at a time, each to its own thread', 
     post('/api/send', { thread: 't-rcs', text: 'second of two' }).then((r) => r.json()),
   ]);
   assert.deepEqual([a.ok, a.sent?.id, b.ok, b.sent?.id], [true, 't-friend', true, 't-rcs'], JSON.stringify([a, b]));
-  const sends = mock.actions().filter((x) => x.action === 'send' && /of two$/.test(x.text)).map((x) => [x.id, x.text]);
+  // Either may reach the page first; each must land in its own thread.
+  const sends = mock.actions().filter((x) => x.action === 'send' && /of two$/.test(x.text)).map((x) => [x.id, x.text]).sort();
   assert.deepEqual(sends, [['t-friend', 'first of two'], ['t-rcs', 'second of two']]);
 });
 
