@@ -78,6 +78,14 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   assert.ok(!/555|0399|Texting/.test(shapes[0].shape), 'no words or numbers in the saved layout');
   // Text shaped like the banner is a message, judged as text.
   assert.deepEqual(byId(acts, 't-fake-banner'), ['block_report']);
+  // Your own message (an invitation to a new number) is never judged, so
+  // its recipient is never blocked, whatever the text.
+  assert.deepEqual(byId(acts, 't-own-invite'), []);
+  assert.equal(outcome('t-own-invite'), 'not checked: your own message');
+  assert.ok(!asked.some((q) => /Hi Gaye/.test(q.text ?? '')));
+  // A sender who starts a text with "You:" is still judged: the page, not
+  // the preview, says who sent it.
+  assert.deepEqual(byId(acts, 't-fake-you'), ['block_report']);
 });
 
 test('a block can be undone through the Spam & blocked dialog', async () => {

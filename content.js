@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, readMessages, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -116,6 +116,21 @@
 
   const looksLikeNamedContact = (name) => !!name && !/[\d@]/.test(name);
   const isSkippedContact = (t, settings) => settings.skipNamedContacts && looksLikeNamedContact(t.name);
+  // A thread whose newest message is yours (an invitation to a new number,
+  // a reply) is never judged: blocking it would block the person you wrote
+  // to. The list previews your messages as "You: …", but a sender can type
+  // that too, so the preview only prompts a look; the opened message's
+  // is-outgoing flag decides. Confirmed previews are remembered by text.
+  const ownPreviews = new Map();
+  const isOwnMessage = (t) => ownPreviews.get(t.id) === t.text;
+  async function confirmOwnMessage(t) {
+    if (!/^You:/.test(t.text ?? '')) return false;
+    const { messages } = await readMessages(t.id, { limit: 1 });
+    const own = messages.at(-1)?.direction === 'out';
+    if (own) ownPreviews.set(t.id, t.text);
+    return own;
+  }
+  const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
 
   // Opening a thread moves the user's view, so existing picture threads are
   // only opened while the Messages tab is in the background.
@@ -227,6 +242,19 @@
     if (isSkippedContact(t, settings)) {
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
+    if (isOwnMessage(t)) return { row: row(t, OWN_ROW), done: true };
+    if (/^You:/.test(t.text ?? '')) {
+      if (!canOpen(isNew || recheck)) return { row: row(t, { label: 'pending', outcome: 'not checked yet: waits until the Messages tab is in the background' }), done: false };
+      try {
+        if (await confirmOwnMessage(t)) return { row: row(t, OWN_ROW), done: true };
+      } catch (err) {
+        // Unknown sender direction: never judged blind, in either direction.
+        const n = (attempts.get(t.id) ?? 0) + 1;
+        attempts.set(t.id, n);
+        const done = n >= MAX_ATTEMPTS;
+        return { row: row(t, { label: 'error', outcome: done ? `not checked: could not tell who sent it after ${n} tries` : `will retry (${n}/${MAX_ATTEMPTS})`, reason: err.message }), done };
+      }
+    }
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
     // A new picture thread checked before its picture loaded gets another
     // look as new, so a spam verdict can still act on it.
@@ -316,6 +344,7 @@
   // Row for a thread this scan didn't process, from what is already known.
   function knownRow(t, { settings, verdicts }) {
     if (isSkippedContact(t, settings)) return row(t, { label: 'contact', outcome: 'not checked: saved contact' });
+    if (isOwnMessage(t)) return row(t, OWN_ROW);
     const v = cached(verdicts, t);
     if (!v) return needsOpen(t) ? waitingRow(t) : row(t, { label: 'pending', outcome: 'not classified yet' });
     return fromVerdict(t, v, decide(v, { isNew: false, settings, thread: t }).outcome);
@@ -453,6 +482,7 @@
         (t) =>
           !rows.has(t.id) &&
           !isSkippedContact(t, settings) &&
+          !isOwnMessage(t) &&
           (!cached(verdicts, t) || (checkPictures && needsOpen(t) && cached(verdicts, t).media === 'picture not retrieved')) &&
           (!needsOpen(t) || canOpen(false)) &&
           (attempts.get(t.id) ?? 0) < MAX_ATTEMPTS,

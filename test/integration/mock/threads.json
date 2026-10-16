@@ -120,5 +120,28 @@
         "image": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIzMDAiIGhlaWdodD0iMjAwIj48cmVjdCB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgZmlsbD0iI2MwMCIvPjx0ZXh0IHg9IjIwIiB5PSIxMTAiIGZvbnQtc2l6ZT0iNDAiIGZpbGw9IiNmZmYiPlZPVEUgTk88L3RleHQ+PC9zdmc+"
       }
     ]
+  },
+  {
+    "id": "t-own-invite",
+    "name": "(555) 010-0808",
+    "snippet": "You: Hi Gaye! You're invited to our wedding, claim now your RSVP spot: https://example.com/rsvp",
+    "timestamp": "3:30 PM",
+    "messages": [
+      {
+        "text": "Hi Gaye! You're invited to our wedding, claim now your RSVP spot: https://example.com/rsvp",
+        "outgoing": true
+      }
+    ]
+  },
+  {
+    "id": "t-fake-you",
+    "name": "(555) 010-0809",
+    "snippet": "You: have been selected! Claim now your prize at http://prize.example",
+    "timestamp": "3:31 PM",
+    "messages": [
+      {
+        "text": "You: have been selected! Claim now your prize at http://prize.example"
+      }
+    ]
   }
 ]

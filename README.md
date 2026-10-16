@@ -84,7 +84,9 @@ the next scan. After three looks it is judged with whatever has loaded.
 
 Automatic classification skips names without digits or `@` by default. This
 is a name heuristic, not a lookup in your contacts. Change `skipNamedContacts`
-to control it.
+to control it. A thread whose newest message is your own is never checked, so the person
+you wrote to is never blocked; the page's sent-message flag decides, not the
+"You:" preview.
 
 The dashboard's **View message** action shows the saved preview and reason
 before offering **Undo block** or **Unarchive**. Previews contain up to 500
