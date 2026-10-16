@@ -127,8 +127,9 @@
   const isOwnMessage = (t) => {
     const o = ownPreviews.get(t.id);
     if (!o || o.text !== t.text) return false;
-    // No time on either side: the list's own label must match exactly.
-    if (o.msgTime == null || t.msgTime == null) return o.timestamp === t.timestamp;
+    // No time on either side: the list's own label must match exactly, and
+    // with no label at all the direction is looked up again.
+    if (o.msgTime == null || t.msgTime == null) return !!o.timestamp && o.timestamp === t.timestamp;
     return Math.abs(t.msgTime - o.msgTime) <= STALE_SLACK_MS;
   };
   async function confirmOwnMessage(t) {
