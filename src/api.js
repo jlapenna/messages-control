@@ -19,6 +19,7 @@ import { eventDetails } from './event-details.js';
 // /api/* needs "Authorization: Bearer <api.token>".
 const DASHBOARD = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dashboard.html');
 const START = Date.now();
+const REPLAY_PAGE = 500;
 
 // A send request checked before it reaches the page: a text, and exactly
 // one of a listed thread's id or a phone number. Returns {thread, to, text}
@@ -203,9 +204,12 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
 
   // Server-sent events: one "message" event per new message, its id the
   // row id. With ?after=ID (or the Last-Event-ID a reconnecting client
-  // sends) every row after that id is replayed first, page by page, so
-  // nothing is lost across a reconnect; the database is synchronous, so no
-  // row can be recorded between the replay and the subscription. A comment line every 25 s keeps proxies from timing out.
+  // sends) every row after that id is replayed first, so nothing is lost
+  // across a reconnect. The replay goes page by page, waits whenever the
+  // client is behind (drain) and yields between pages, so a long backlog
+  // neither fills memory nor holds up other requests; live messages that
+  // arrive meanwhile wait their turn. A comment line every 25 s keeps
+  // proxies from timing out.
   function stream(req, res, url) {
     const after = cursor(url.searchParams.get('after') ?? req.headers['last-event-id']);
     const query = messageQuery(url, { after });
@@ -218,27 +222,55 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       'X-Content-Type-Options': 'nosniff',
     });
     let last = after ?? 0;
+    let closed = false;
+    let replaying = after != null;
+    const waiting = [];
+    // False when the client is behind and the replay should wait.
     const write = (m) => {
-      if (m.id <= last) return;
+      if (m.id <= last) return true;
       last = m.id;
-      res.write(`id: ${m.id}\nevent: message\ndata: ${JSON.stringify(m)}\n\n`);
+      return res.write(`id: ${m.id}\nevent: message\ndata: ${JSON.stringify(m)}\n\n`);
     };
+    const drained = () =>
+      new Promise((resolve) => {
+        const done = () => {
+          res.off('drain', done);
+          res.off('close', done);
+          resolve();
+        };
+        res.on('drain', done);
+        res.on('close', done);
+      });
     res.write(`retry: 5000\n: ${settings.messageRetentionDays > 0 ? 'watching for messages' : 'messageRetentionDays is 0: no messages are recorded'}\n\n`);
-    if (after != null) {
-      for (let page; !page || page.length === 1000; ) {
-        page = db.messages({ ...query, after: last, limit: 1000 });
-        for (const m of page) write(m);
-      }
-    }
-    const onMessage = (m) => matches(m) && write(m);
+    // Subscribed before the replay reads anything, so no row falls between
+    // the two; the ids drop whatever both deliver.
+    const onMessage = (m) => {
+      if (!matches(m)) return;
+      if (replaying) waiting.push(m);
+      else write(m);
+    };
     messageEvents?.on('message', onMessage);
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
     const stop = () => {
+      closed = true;
       clearInterval(ping);
       messageEvents?.off('message', onMessage);
     };
     req.on('close', stop);
     res.on('error', stop);
+    if (!replaying) return;
+    (async () => {
+      for (let page; !closed && (!page || page.length === REPLAY_PAGE); ) {
+        page = db.messages({ ...query, after: last, limit: REPLAY_PAGE });
+        for (const m of page) if (!write(m) && !closed) await drained();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      replaying = false;
+      for (const m of waiting.splice(0)) if (!closed) write(m);
+    })().catch((err) => {
+      log(`message stream replay failed: ${err.message}`);
+      res.destroy();
+    });
   }
 
   function review() {

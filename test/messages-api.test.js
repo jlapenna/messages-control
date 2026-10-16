@@ -114,6 +114,25 @@ test('a client far behind gets the whole backlog before live messages', { timeou
   assert.ok(events.every((e, i) => !i || e.id > events[i - 1].id), 'in order, no repeats');
 });
 
+test('during a long replay to a slow client, other requests are answered and a live message arrives once, in order', { timeout: 20000 }, async () => {
+  const last = db.messages({ limit: 1 })[0].id;
+  const filler = 'x'.repeat(480);
+  for (let i = 0; i < 6000; i++) db.recordMessage({ threadId: 'slow', name: 'Slow', direction: 'in', text: `${i} ${filler}` });
+  const ac = new AbortController();
+  // Nothing is read from this stream for a while: the server must wait.
+  const res = await fetch(`${base}/api/messages/stream?after=${last}&thread=slow`, { headers: auth, signal: ac.signal });
+  const started = Date.now();
+  const other = await fetch(`${base}/api/messages?limit=1`, { headers: auth });
+  assert.equal(other.status, 200);
+  assert.ok(Date.now() - started < 2000, 'other requests are answered during the replay');
+  arrive({ threadId: 'slow', name: 'Slow', direction: 'in', text: 'live during replay' });
+  const events = await readEvents(res, 6001);
+  ac.abort();
+  assert.equal(events.length, 6001);
+  assert.equal(events.at(-1).text, 'live during replay');
+  assert.ok(events.every((e, i) => !i || e.id > events[i - 1].id), 'in order, no repeats');
+});
+
 test('threads and one conversation are read live from the page', async () => {
   const list = await (await fetch(`${base}/api/threads?q=ale&limit=5`, { headers: auth })).json();
   assert.equal(list[0].name, 'Alex');
