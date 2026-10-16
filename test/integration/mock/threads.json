@@ -132,5 +132,16 @@
         "outgoing": true
       }
     ]
+  },
+  {
+    "id": "t-fake-you",
+    "name": "(555) 010-0809",
+    "snippet": "You: have been selected! Claim now your prize at http://prize.example",
+    "timestamp": "3:31 PM",
+    "messages": [
+      {
+        "text": "You: have been selected! Claim now your prize at http://prize.example"
+      }
+    ]
   }
 ]

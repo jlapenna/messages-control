@@ -83,6 +83,9 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   assert.deepEqual(byId(acts, 't-own-invite'), []);
   assert.equal(outcome('t-own-invite'), 'not checked: your own message');
   assert.ok(!asked.some((q) => /Hi Gaye/.test(q.text ?? '')));
+  // A sender who starts a text with "You:" is still judged: the page, not
+  // the preview, says who sent it.
+  assert.deepEqual(byId(acts, 't-fake-you'), ['block_report']);
 });
 
 test('a block can be undone through the Spam & blocked dialog', async () => {
