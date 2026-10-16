@@ -122,15 +122,18 @@
   // that too, so the preview only prompts a look; the opened message's
   // is-outgoing flag decides. Confirmed previews are remembered by text.
   const ownPreviews = new Map();
-  // Keyed by preview and message time, so a later message with the same
-  // words is looked at again.
-  const ownKey = (t) => `${t.text}\u0000${t.msgTime ?? t.timestamp}`;
-  const isOwnMessage = (t) => ownPreviews.get(t.id) === ownKey(t);
+  // Matched by preview and message time (within the list's rounding, as
+  // in cached()), so a later message with the same words is looked at again.
+  const isOwnMessage = (t) => {
+    const o = ownPreviews.get(t.id);
+    if (!o || o.text !== t.text) return false;
+    return o.msgTime == null || t.msgTime == null || Math.abs(t.msgTime - o.msgTime) <= STALE_SLACK_MS;
+  };
   async function confirmOwnMessage(t) {
     if (!/^You:/.test(t.text ?? '')) return false;
     const { messages } = await readMessages(t.id, { limit: 1 });
     const own = messages.at(-1)?.direction === 'out';
-    if (own) ownPreviews.set(t.id, ownKey(t));
+    if (own) ownPreviews.set(t.id, { text: t.text, msgTime: t.msgTime });
     return own;
   }
   const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
@@ -503,7 +506,8 @@
         // parallel; archiving and trashing (page actions) happen one by one
         // below. Picture threads follow one by one when checkPictures is set,
         // otherwise they're left to "Check pictures now".
-        const todo = unlabelled.filter((t) => !needsOpen(t));
+        // "You:" previews go through processThread, which checks who sent them.
+        const todo = unlabelled.filter((t) => !needsOpen(t) && !/^You:/.test(t.text ?? ''));
         let done = 0;
         const failed = [];
         const worker = async () => {
