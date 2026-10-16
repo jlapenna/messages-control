@@ -98,22 +98,28 @@
       .map(({ id, name, snippet, timestamp, msgTime, unread }) => ({ id, name, snippet, timestamp, msgTime, unread }));
   };
 
-  // Reading and sending open a thread; a scan clicking through the list at
-  // the same moment would land in the wrong one. content.js holds off while
-  // this is set.
-  async function exclusive(fn) {
-    // Claim the page first: a scan that starts now waits for this one
-    // instead (content.js), and one already running is waited for here.
-    globalThis.MessagesControlReading = true;
-    try {
-      const idle = await waitFor(() => !globalThis.MessagesControlScanning, 60000, 250);
-      if (!idle) return { ok: false, error: 'a scan is running; try again shortly' };
-      return await fn();
-    } catch (err) {
-      return { ok: false, error: err.message };
-    } finally {
-      globalThis.MessagesControlReading = false;
-    }
+  // Reading and sending open a thread; anything else clicking through the
+  // list at the same moment would land in the wrong one. So these run one at
+  // a time, in arrival order (two sends at once must not type into each
+  // other's conversation), and content.js holds off while one runs.
+  let queue = Promise.resolve();
+  function exclusive(fn) {
+    const run = queue.then(async () => {
+      // Claim the page first: a scan that starts now waits for this one
+      // instead (content.js), and one already running is waited for here.
+      globalThis.MessagesControlReading = true;
+      try {
+        const idle = await waitFor(() => !globalThis.MessagesControlScanning, 60000, 250);
+        if (!idle) return { ok: false, error: 'a scan is running; try again shortly' };
+        return await fn();
+      } catch (err) {
+        return { ok: false, error: err.message };
+      } finally {
+        globalThis.MessagesControlReading = false;
+      }
+    });
+    queue = run;
+    return run;
   }
 
   // A thread by id or unique id prefix, loading the rest of the list if it

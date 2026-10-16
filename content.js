@@ -343,11 +343,14 @@
     // trash spam unless dry run is on.
     const { includeSeen = false, checkPictures = false, trashSpam = false, processAll = false } = opts;
     scanning = true;
-    // The standalone API may have a thread open for reading (message-events.js);
-    // clicking through the list now would land in the wrong conversation.
-    if (globalThis.MessagesControlReading) await waitFor(() => !globalThis.MessagesControlReading, 120000, 250);
-    globalThis.MessagesControlScanning = true; // read by the standalone runner
     try {
+      // The standalone API may have a thread open (message-events.js);
+      // clicking through the list now would land in the wrong conversation.
+      // If it keeps the page, skip: the next scan catches up.
+      if (globalThis.MessagesControlReading && !(await waitFor(() => !globalThis.MessagesControlReading, 120000, 250))) {
+        return 'Skipped: the local API is using the page; the next scan catches up.';
+      }
+      globalThis.MessagesControlScanning = true; // read by the standalone runner
       const { settings } = await send({ type: 'getSettings' });
       if (!settings.enabled && !includeSeen && !checkPictures && !trashSpam && !processAll) return 'Watching is off.';
       if (trashSpam && settings.dryRun) return 'Dry run is on; turn it off to act on spam.';
