@@ -116,6 +116,11 @@
 
   const looksLikeNamedContact = (name) => !!name && !/[\d@]/.test(name);
   const isSkippedContact = (t, settings) => settings.skipNamedContacts && looksLikeNamedContact(t.name);
+  // The list previews the phone's own last message as "You: …". A thread
+  // whose newest message is yours (an invitation to a new number, a reply)
+  // is never judged: blocking it would block the person you wrote to.
+  const isOwnMessage = (t) => /^You:/.test(t.text ?? '');
+  const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
 
   // Opening a thread moves the user's view, so existing picture threads are
   // only opened while the Messages tab is in the background.
@@ -227,6 +232,7 @@
     if (isSkippedContact(t, settings)) {
       return { row: row(t, { label: 'contact', outcome: 'not checked: saved contact' }), done: true };
     }
+    if (isOwnMessage(t)) return { row: row(t, OWN_ROW), done: true };
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
     // A new picture thread checked before its picture loaded gets another
     // look as new, so a spam verdict can still act on it.
@@ -316,6 +322,7 @@
   // Row for a thread this scan didn't process, from what is already known.
   function knownRow(t, { settings, verdicts }) {
     if (isSkippedContact(t, settings)) return row(t, { label: 'contact', outcome: 'not checked: saved contact' });
+    if (isOwnMessage(t)) return row(t, OWN_ROW);
     const v = cached(verdicts, t);
     if (!v) return needsOpen(t) ? waitingRow(t) : row(t, { label: 'pending', outcome: 'not classified yet' });
     return fromVerdict(t, v, decide(v, { isNew: false, settings, thread: t }).outcome);
@@ -453,6 +460,7 @@
         (t) =>
           !rows.has(t.id) &&
           !isSkippedContact(t, settings) &&
+          !isOwnMessage(t) &&
           (!cached(verdicts, t) || (checkPictures && needsOpen(t) && cached(verdicts, t).media === 'picture not retrieved')) &&
           (!needsOpen(t) || canOpen(false)) &&
           (attempts.get(t.id) ?? 0) < MAX_ATTEMPTS,
