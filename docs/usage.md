@@ -169,7 +169,10 @@ The watcher records every new message that reaches the top of the
 conversation list, from any sender (saved contacts too), RCS and SMS/MMS
 alike, because it reads Messages for web rather than the carrier. A new
 message is a changed preview: two identical texts in a row count once, and
-the first look at an inbox is the baseline, not events. Previews (up to 500
+the first look at an inbox is the baseline, not events. Only a thread's latest
+preview is visible, so several texts that reach one thread within half a
+second, or while the watcher is down, are recorded as the last of them; read
+the conversation for the rest. Previews (up to 500
 characters) are kept `messageRetentionDays`. Messages that arrive while the
 watcher is down are recorded when it comes back.
 

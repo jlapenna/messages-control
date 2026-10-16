@@ -100,6 +100,20 @@ test('a reconnecting client resumes from Last-Event-ID without losing messages',
   assert.deepEqual(events.map((e) => e.id), [3, 4]);
 });
 
+test('a client far behind gets the whole backlog before live messages', { timeout: 10000 }, async () => {
+  const last = db.messages({ limit: 1 })[0].id;
+  for (let i = 0; i < 2105; i++) db.recordMessage({ threadId: 'bulk', name: 'Bulk', direction: 'in', text: `n${i}` });
+  const ac = new AbortController();
+  const res = await fetch(`${base}/api/messages/stream?after=${last}&thread=bulk`, { headers: auth, signal: ac.signal });
+  const got = readEvents(res, 2106);
+  setTimeout(() => arrive({ threadId: 'bulk', name: 'Bulk', direction: 'in', text: 'live' }), 50);
+  const events = await got;
+  ac.abort();
+  assert.equal(events.length, 2106);
+  assert.deepEqual([events[0].text, events[1104].text, events.at(-2).text, events.at(-1).text], ['n0', 'n1104', 'n2104', 'live']);
+  assert.ok(events.every((e, i) => !i || e.id > events[i - 1].id), 'in order, no repeats');
+});
+
 test('threads and one conversation are read live from the page', async () => {
   const list = await (await fetch(`${base}/api/threads?q=ale&limit=5`, { headers: auth })).json();
   assert.equal(list[0].name, 'Alex');

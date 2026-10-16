@@ -203,8 +203,9 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
 
   // Server-sent events: one "message" event per new message, its id the
   // row id. With ?after=ID (or the Last-Event-ID a reconnecting client
-  // sends) the rows after that id are replayed first, so nothing is lost
-  // across a reconnect. A comment line every 25 s keeps proxies from timing out.
+  // sends) every row after that id is replayed first, page by page, so
+  // nothing is lost across a reconnect; the database is synchronous, so no
+  // row can be recorded between the replay and the subscription. A comment line every 25 s keeps proxies from timing out.
   function stream(req, res, url) {
     const after = cursor(url.searchParams.get('after') ?? req.headers['last-event-id']);
     const query = messageQuery(url, { after });
@@ -223,7 +224,12 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       res.write(`id: ${m.id}\nevent: message\ndata: ${JSON.stringify(m)}\n\n`);
     };
     res.write(`retry: 5000\n: ${settings.messageRetentionDays > 0 ? 'watching for messages' : 'messageRetentionDays is 0: no messages are recorded'}\n\n`);
-    if (after != null) for (const m of db.messages({ ...query, limit: 1000 })) write(m);
+    if (after != null) {
+      for (let page; !page || page.length === 1000; ) {
+        page = db.messages({ ...query, after: last, limit: 1000 });
+        for (const m of page) write(m);
+      }
+    }
     const onMessage = (m) => matches(m) && write(m);
     messageEvents?.on('message', onMessage);
     const ping = setInterval(() => res.write(': ping\n\n'), 25000);
