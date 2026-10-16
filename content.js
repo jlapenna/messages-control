@@ -127,13 +127,16 @@
   const isOwnMessage = (t) => {
     const o = ownPreviews.get(t.id);
     if (!o || o.text !== t.text) return false;
-    return o.msgTime == null || t.msgTime == null || Math.abs(t.msgTime - o.msgTime) <= STALE_SLACK_MS;
+    // No time on either side: the list's own label must match exactly, and
+    // with no label at all the direction is looked up again.
+    if (o.msgTime == null || t.msgTime == null) return !!o.timestamp && o.timestamp === t.timestamp;
+    return Math.abs(t.msgTime - o.msgTime) <= STALE_SLACK_MS;
   };
   async function confirmOwnMessage(t) {
     if (!/^You:/.test(t.text ?? '')) return false;
     const { messages } = await readMessages(t.id, { limit: 1 });
     const own = messages.at(-1)?.direction === 'out';
-    if (own) ownPreviews.set(t.id, { text: t.text, msgTime: t.msgTime });
+    if (own) ownPreviews.set(t.id, { text: t.text, msgTime: t.msgTime, timestamp: t.timestamp });
     return own;
   }
   const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
