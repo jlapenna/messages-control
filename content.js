@@ -122,12 +122,15 @@
   // that too, so the preview only prompts a look; the opened message's
   // is-outgoing flag decides. Confirmed previews are remembered by text.
   const ownPreviews = new Map();
-  const isOwnMessage = (t) => ownPreviews.get(t.id) === t.text;
+  // Keyed by preview and message time, so a later message with the same
+  // words is looked at again.
+  const ownKey = (t) => `${t.text}\u0000${t.msgTime ?? t.timestamp}`;
+  const isOwnMessage = (t) => ownPreviews.get(t.id) === ownKey(t);
   async function confirmOwnMessage(t) {
     if (!/^You:/.test(t.text ?? '')) return false;
     const { messages } = await readMessages(t.id, { limit: 1 });
     const own = messages.at(-1)?.direction === 'out';
-    if (own) ownPreviews.set(t.id, t.text);
+    if (own) ownPreviews.set(t.id, ownKey(t));
     return own;
   }
   const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
@@ -248,11 +251,11 @@
       try {
         if (await confirmOwnMessage(t)) return { row: row(t, OWN_ROW), done: true };
       } catch (err) {
-        // Unknown sender direction: never judged blind, in either direction.
+        // Unknown direction: retry, and on the last try judge it as any
+        // other thread rather than let a failing look skip the filter.
         const n = (attempts.get(t.id) ?? 0) + 1;
         attempts.set(t.id, n);
-        const done = n >= MAX_ATTEMPTS;
-        return { row: row(t, { label: 'error', outcome: done ? `not checked: could not tell who sent it after ${n} tries` : `will retry (${n}/${MAX_ATTEMPTS})`, reason: err.message }), done };
+        if (n < MAX_ATTEMPTS) return { row: row(t, { label: 'error', outcome: `could not tell who sent it; will retry (${n}/${MAX_ATTEMPTS})`, reason: err.message }), done: false };
       }
     }
     let v = recheck && needsOpen(t) ? null : cached(verdicts, t);
