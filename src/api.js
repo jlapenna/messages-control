@@ -10,12 +10,36 @@ import { eventDetails } from './event-details.js';
 //   GET  /metrics         Prometheus text (no token)
 //   GET  /                the dashboard (asks for the token in the browser)
 //   GET  /api/status, /api/events?since&limit, /api/events/:id, /api/review, /api/policies, /api/verdicts
+//   GET  /api/messages?after&since&thread&direction&q&limit   new messages seen arriving (recorded)
+//   GET  /api/messages/stream?after&thread&direction          the same, live, as server-sent events
+//   GET  /api/threads?q&limit                                 the conversation list, live from the page
+//   GET  /api/threads/:id/messages?limit                      one conversation, opened (marks it read)
 //   POST /api/act {id, action}, /api/undo {event}, /api/scan {includeSeen, checkPictures, trashSpam, processAll}
+//   POST /api/send {thread | to, text}                         sends a text now (dry run does not apply)
 // /api/* needs "Authorization: Bearer <api.token>".
 const DASHBOARD = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dashboard.html');
 const START = Date.now();
 
-export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = [], db, store, backend, health, deliver, policy, log = console.log }) {
+// A send request checked before it reaches the page: a text, and exactly
+// one of a listed thread's id or a phone number. Returns {thread, to, text}
+// or {error}.
+export function sendRequest(body) {
+  const text = typeof body?.text === 'string' ? body.text.trim() : '';
+  const thread = body?.thread ? String(body.thread) : null;
+  const to = body?.to ? String(body.to).trim() : null;
+  if (!text) return { error: 'text required' };
+  if (text.length > 2000) return { error: 'text is over 2000 characters' };
+  // Typing a line break presses Enter, which sends what is typed so far.
+  if (/[\r\n]/.test(text)) return { error: 'text must be one line' };
+  if (!thread === !to) return { error: 'exactly one of thread (an id) or to (a phone number) required' };
+  if (to) {
+    const digits = to.replace(/\D/g, '').length;
+    if (!/^\+?[\d\s().-]+$/.test(to) || digits < 7 || digits > 15) return { error: `to must be a phone number, not "${to}"` };
+  }
+  return { thread, to, text };
+}
+
+export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = [], db, store, backend, health, deliver, messageEvents = null, policy, log = console.log }) {
   const server = http.createServer((req, res) => {
     handle(req, res).catch((err) => {
       send(res, 500, { error: err.message });
@@ -83,6 +107,15 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
     if (!authorized(req)) return send(res, 401, { error: 'bearer token required (api.token in the config)' });
 
     if (req.method === 'GET') {
+      if (url.pathname === '/api/messages/stream') return stream(req, res, url);
+      const threadMatch = /^\/api\/threads\/([^/]+)\/messages$/.exec(url.pathname);
+      if (threadMatch) {
+        const limit = clamp(url.searchParams.get('limit'), 50, 500);
+        const r = await deliver({ type: 'readMessages', id: decodeURIComponent(threadMatch[1]), limit });
+        if (!r) return send(res, 409, { ok: false, error: 'no answer from the page' });
+        if (!r.ok) return send(res, /not in the loaded/.test(r.error ?? '') ? 404 : 409, r);
+        return send(res, 200, r.thread);
+      }
       const eventMatch = /^\/api\/events\/(\d+)$/.exec(url.pathname);
       if (eventMatch) {
         const event = db.event(Number(eventMatch[1]));
@@ -96,6 +129,12 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
           const since = Number(url.searchParams.get('since') ?? 0);
           const limit = Math.min(1000, Number(url.searchParams.get('limit') ?? 100));
           return send(res, 200, db.events({ since, limit }).map(({ text, ...r }) => r));
+        }
+        case '/api/messages':
+          return send(res, 200, db.messages(messageQuery(url)));
+        case '/api/threads': {
+          const r = await deliver({ type: 'threads', q: url.searchParams.get('q') ?? '', limit: clamp(url.searchParams.get('limit'), 50, 1000) });
+          return r?.ok ? send(res, 200, r.threads) : send(res, 409, r ?? { ok: false, error: 'no answer from the page' });
         }
         case '/api/review':
           return send(res, 200, review());
@@ -126,6 +165,13 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
           const r = await deliver({ type: 'undo', kind, name: event.name, threadId: event.thread_id, text });
           return send(res, r?.ok ? 200 : 409, r ?? { ok: false, error: 'no answer from the page' });
         }
+        case '/api/send': {
+          const request = sendRequest(body);
+          if (request.error) return send(res, 400, { ok: false, error: request.error });
+          const r = await deliver({ type: 'sendMessage', ...request });
+          if (!r) return send(res, 409, { ok: false, error: 'no answer from the page' });
+          return send(res, r.ok ? 200 : /not in the loaded/.test(r.error ?? '') ? 404 : 409, r);
+        }
         case '/api/scan': {
           const opts = Object.fromEntries(['includeSeen', 'checkPictures', 'trashSpam', 'processAll'].map((k) => [k, !!body[k]]));
           const r = await deliver({ type: 'scanNow', ...opts });
@@ -136,6 +182,57 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       }
     }
     return send(res, 405, { error: 'method not allowed' });
+  }
+
+  const clamp = (value, fallback, max) => {
+    const n = Number(value ?? fallback);
+    return Number.isFinite(n) && n > 0 ? Math.min(max, Math.floor(n)) : fallback;
+  };
+  const cursor = (value) => (value != null && /^\d+$/.test(String(value)) ? Number(value) : null);
+  function messageQuery(url, { after = cursor(url.searchParams.get('after')) } = {}) {
+    const direction = url.searchParams.get('direction');
+    return {
+      after,
+      since: Number(url.searchParams.get('since') ?? 0) || 0,
+      thread: url.searchParams.get('thread') || null,
+      direction: direction === 'in' || direction === 'out' ? direction : null,
+      q: url.searchParams.get('q') || null,
+      limit: clamp(url.searchParams.get('limit'), 100, 1000),
+    };
+  }
+
+  // Server-sent events: one "message" event per new message, its id the
+  // row id. With ?after=ID (or the Last-Event-ID a reconnecting client
+  // sends) the rows after that id are replayed first, so nothing is lost
+  // across a reconnect. A comment line every 25 s keeps proxies from timing out.
+  function stream(req, res, url) {
+    const after = cursor(url.searchParams.get('after') ?? req.headers['last-event-id']);
+    const query = messageQuery(url, { after });
+    const matches = (m) => (!query.thread || m.threadId === query.thread) && (!query.direction || m.direction === query.direction);
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    let last = after ?? 0;
+    const write = (m) => {
+      if (m.id <= last) return;
+      last = m.id;
+      res.write(`id: ${m.id}\nevent: message\ndata: ${JSON.stringify(m)}\n\n`);
+    };
+    res.write(`retry: 5000\n: ${settings.messageRetentionDays > 0 ? 'watching for messages' : 'messageRetentionDays is 0: no messages are recorded'}\n\n`);
+    if (after != null) for (const m of db.messages({ ...query, limit: 1000 })) write(m);
+    const onMessage = (m) => matches(m) && write(m);
+    messageEvents?.on('message', onMessage);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    const stop = () => {
+      clearInterval(ping);
+      messageEvents?.off('message', onMessage);
+    };
+    req.on('close', stop);
+    res.on('error', stop);
   }
 
   function review() {

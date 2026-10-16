@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-// The audit trail and a queryable copy of the verdicts, in SQLite
+// The audit trail, the messages seen arriving and a queryable copy of the
+// verdicts, in SQLite
 // (state.db next to state.json). events is append-only: the JSON log the
 // page keeps is capped at 300 entries, this is the whole history. The page
 // itself still reads and writes state.json through the chrome.storage shim.
@@ -26,6 +27,19 @@ export class Db {
       );
       create index if not exists events_time on events(time);
       create index if not exists events_thread on events(thread_id);
+      create table if not exists messages (
+        id integer primary key,
+        time integer not null,
+        thread_id text not null,
+        name text,
+        direction text,
+        text text,
+        unread integer,
+        list_time text,
+        msg_time integer
+      );
+      create index if not exists messages_time on messages(time);
+      create index if not exists messages_thread on messages(thread_id, id);
       create table if not exists verdicts (
         thread_id text primary key,
         label text not null,
@@ -53,6 +67,9 @@ export class Db {
     this.insertEvent = this.db.prepare(
       'insert into events (time, label, thread_id, name, outcome, reason, score, rule, method, text) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
     );
+    this.insertMessage = this.db.prepare(
+      'insert into messages (time, thread_id, name, direction, text, unread, list_time, msg_time) values (?, ?, ?, ?, ?, ?, ?, ?)',
+    );
     this.upsertVerdict = this.db.prepare(`
       insert into verdicts (thread_id, label, score, reason, version, time, msg_time, media, text, extract)
       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -76,6 +93,45 @@ export class Db {
       e.method ?? null,
       e.text == null ? null : String(e.text).slice(0, 500),
     );
+  }
+
+  // One new message seen in the conversation list (message-events.js).
+  // Returns the stored row; its id is the cursor for the API and the stream.
+  recordMessage(m) {
+    const { lastInsertRowid } = this.insertMessage.run(
+      m.time ?? Date.now(),
+      String(m.threadId),
+      m.name ?? null,
+      m.direction === 'out' ? 'out' : 'in',
+      m.text == null ? null : String(m.text).slice(0, 500),
+      m.unread ? 1 : 0,
+      m.listTime ?? null,
+      m.msgTime ?? null,
+    );
+    return this.message(Number(lastInsertRowid));
+  }
+
+  message(id) {
+    const r = this.db.prepare('select * from messages where id = ?').get(id);
+    return r ? messageRow(r) : null;
+  }
+
+  // Newest first unless after is given (a cursor: rows after that id, oldest
+  // first, for following along). q matches the text or the sender's name.
+  messages({ after = null, since = 0, thread = null, direction = null, q = null, limit = 100 } = {}) {
+    const where = ['time >= ?'];
+    const args = [since];
+    if (after != null) (where.push('id > ?'), args.push(after));
+    if (thread) (where.push('thread_id = ?'), args.push(thread));
+    if (direction) (where.push('direction = ?'), args.push(direction));
+    if (q) (where.push("(text like ? escape '\\' or name like ? escape '\\')"), args.push(like(q), like(q)));
+    const order = after != null ? 'id asc' : 'id desc';
+    return this.db.prepare(`select * from messages where ${where.join(' and ')} order by ${order} limit ?`).all(...args, limit).map(messageRow);
+  }
+
+  // Message text is personal; it is kept only this long.
+  pruneMessages(before) {
+    return Number(this.db.prepare('delete from messages where time < ?').run(before).changes);
   }
 
   // Mirror the page's verdict cache (the whole object, as chrome.storage
@@ -135,4 +191,10 @@ export class Db {
   close() {
     this.db.close();
   }
+}
+
+const like = (q) => `%${String(q).replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+function messageRow(r) {
+  return { id: r.id, time: r.time, threadId: r.thread_id, name: r.name, direction: r.direction, text: r.text, unread: !!r.unread, listTime: r.list_time, msgTime: r.msg_time };
 }

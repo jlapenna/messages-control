@@ -22,7 +22,7 @@ export function verdictFor(text) {
 }
 
 export async function startMock({ threads = [], port = 0 } = {}) {
-  let state = { threads: structuredClone(threads), blocked: [], archived: [] };
+  let state = { threads: structuredClone(threads), blocked: [], archived: [], version: 0 };
   const actions = [];
   const llm = [];
   const json = (res, status, body) => {
@@ -36,8 +36,24 @@ export async function startMock({ threads = [], port = 0 } = {}) {
       req.on('data', (c) => (s += c));
       req.on('end', () => resolve(s ? JSON.parse(s) : {}));
     });
+  const phoneKey = (v) => {
+    const d = String(v ?? '').replace(/\D/g, '');
+    return d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+  };
   // What the phone would remember between page loads.
   function apply(a) {
+    // "Start chat" with a number: the conversation with whoever has it (a
+    // saved contact's included), else a new one that is listed once it has
+    // a message.
+    if (a.action === 'start') {
+      const key = phoneKey(a.to);
+      let t = state.threads.find((x) => !x.gone && /\d/.test(key) && (phoneKey(x.phone) === key || (!/[a-z]/i.test(x.name) && phoneKey(x.name) === key)));
+      if (!t) {
+        t = { id: `t-new-${key}`, name: a.to, draft: true, snippet: '', timestamp: '', messages: [] };
+        state.threads.push(t);
+      }
+      return { id: t.id };
+    }
     const t = state.threads.find((x) => x.id === a.id);
     if (!t) return;
     if (a.action === 'trash' || a.action === 'archive' || a.action === 'block' || a.action === 'block_report') t.gone = true;
@@ -48,17 +64,30 @@ export async function startMock({ threads = [], port = 0 } = {}) {
       state.blocked = state.blocked.filter((r) => r.id !== t.id);
       state.archived = state.archived.filter((r) => r.id !== t.id);
     }
-    if (a.action === 'send') t.messages.push({ text: a.text, outgoing: true });
+    if (a.action === 'send') arrive(t.id, a.text, { outgoing: true });
+  }
+  // A text arriving (or sent from the phone): the thread moves to the top
+  // with the new preview, as the phone pushes it to the page.
+  function arrive(id, text, { outgoing = false } = {}) {
+    const i = state.threads.findIndex((x) => x.id === id);
+    if (i < 0) throw new Error(`no mock thread ${id}`);
+    const [t] = state.threads.splice(i, 1);
+    t.messages.push({ text, outgoing });
+    t.snippet = outgoing ? `You: ${text}` : text;
+    t.timestamp = 'Now';
+    t.draft = false;
+    state.threads.unshift(t);
+    state.version++;
   }
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     if (url.pathname === '/__state') return json(res, 200, state);
+    if (url.pathname === '/__version') return json(res, 200, { version: state.version });
     if (url.pathname === '/__actions') {
       if (req.method === 'POST') {
         const a = await body(req);
         actions.push(a);
-        apply(a);
-        return json(res, 200, { ok: true });
+        return json(res, 200, { ok: true, ...apply(a) });
       }
       return json(res, 200, actions);
     }
@@ -86,8 +115,9 @@ export async function startMock({ threads = [], port = 0 } = {}) {
     actions: () => actions.slice(),
     llm: () => llm.slice(),
     state: () => state,
+    arrive,
     reset(next = threads) {
-      state = { threads: structuredClone(next), blocked: [], archived: [] };
+      state = { threads: structuredClone(next), blocked: [], archived: [], version: 0 };
       actions.length = 0;
       llm.length = 0;
     },

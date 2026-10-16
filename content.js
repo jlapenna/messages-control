@@ -343,6 +343,9 @@
     // trash spam unless dry run is on.
     const { includeSeen = false, checkPictures = false, trashSpam = false, processAll = false } = opts;
     scanning = true;
+    // The standalone API may have a thread open for reading (message-events.js);
+    // clicking through the list now would land in the wrong conversation.
+    if (globalThis.MessagesControlReading) await waitFor(() => !globalThis.MessagesControlReading, 120000, 250);
     globalThis.MessagesControlScanning = true; // read by the standalone runner
     try {
       const { settings } = await send({ type: 'getSettings' });
@@ -742,21 +745,7 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg.type === 'send') {
-      (async () => {
-        if (!msg.live) return { ok: false, error: 'sending needs --live' };
-        try {
-          const t = await threadById(msg.id);
-          await sendText(t.id, msg.text);
-          const r = row(t, { label: 'sent', outcome: `sent "${msg.text.slice(0, 40)}"`, rule: 'send' });
-          await log(r);
-          return { ok: true, row: r };
-        } catch (err) {
-          return { ok: false, error: err.message };
-        }
-      })().then(sendResponse);
-      return true;
-    } else if (msg.type === 'undo') {
+    if (msg.type === 'undo') {
       undo(msg).then(sendResponse);
       return true;
     } else if (msg.type === 'diagnose') {

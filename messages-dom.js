@@ -451,10 +451,10 @@
     }
   }
 
-  // Opens a thread, reads its latest message texts and pictures, then goes
-  // back to whatever conversation was open before. Pictures come back as
-  // data URLs where the page allows it, otherwise as plain URLs.
-  async function readThread(id, { maxImages = 2, maxTexts = 10 } = {}) {
+  // Opens a thread, waits until its messages and pictures have rendered, runs
+  // fn(list) on the message list, then goes back to whatever conversation was
+  // open before.
+  async function withOpenThread(id, fn) {
     const previous = location.pathname;
     const thread = findThread(id);
     if (!thread) throw new Error(`Thread ${id} not in list`);
@@ -480,6 +480,17 @@
         8000,
       );
       await sleep(500);
+      return await fn(list, thread);
+    } finally {
+      await returnTo(previous);
+    }
+  }
+
+  // The last few texts and pictures of a thread, for the classifier.
+  // Pictures come back as data URLs where the page allows it, otherwise as
+  // plain URLs.
+  async function readThread(id, { maxImages = 2, maxTexts = 10 } = {}) {
+    return withOpenThread(id, async (list) => {
       // Real page (2026-10): each message is an mws-message-wrapper; its text
       // is mws-text-message-part (nested [data-e2e-text-message-content]
       // repeats it, so read only the part), pictures are [data-e2e-message-image] img with same-origin blob:
@@ -500,15 +511,64 @@
       const images = [];
       for (const img of imgs) images.push((await imageDataUrl(img)) ?? img.currentSrc ?? img.src);
       return { texts, images };
-    } finally {
-      if (location.pathname !== previous) {
-        const back = threadId(previous) && findThread(threadId(previous));
-        if (back) realClick(back.link);
-        else history.back();
-        // Don't return mid-navigation: the next open would click into it.
-        await waitFor(() => location.pathname === previous, 5000);
-      }
-    }
+    });
+  }
+
+  // How the open conversation is carried: the compose box says "RCS message"
+  // or "Text message" (SMS/MMS) on the real page (2026-10), and SMS threads
+  // carry a "Texting with … (SMS/MMS)" banner. Null when neither says.
+  function conversationChannel(root = document) {
+    const box = root.querySelector('[data-e2e-message-input-box], textarea, [contenteditable="true"][role="textbox"]');
+    const hint = [box?.getAttribute('placeholder'), box?.getAttribute('data-placeholder'), box?.getAttribute('aria-placeholder')].filter(Boolean).join(' ');
+    if (/\bRCS\b/i.test(hint)) return 'rcs';
+    if (/\b(text message|SMS|MMS)\b/i.test(hint)) return 'sms';
+    const banner = [...root.querySelectorAll('mws-tombstone-message-wrapper')].map((b) => b.innerText).join(' ');
+    if (/\(SMS\/MMS\)/i.test(banner)) return 'sms';
+    return null;
+  }
+
+  // Each message's accessible label carries what the bubble does not show:
+  // "Alex Rivera said: … Received on October 15, 2026 at 2:51 PM.
+  // End-to-end encrypted." or "You said: … Sent on … Delivered." (real page,
+  // 2026-10). The text itself is read from the bubble, not the label.
+  const LABEL_TIME_RE = /\b(Received|Sent) on ([A-Z][a-z]+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2}\s?[AP]M)\b/;
+  function parseMessageLabel(label) {
+    if (!label) return {};
+    // The last match: the message text itself may contain "Sent on …".
+    const tail = label.match(new RegExp(`^.*${LABEL_TIME_RE.source}(.*)$`, 's'));
+    const sender = /^(.+?) (said|sent)\b/.exec(label)?.[1] ?? null;
+    const time = tail ? Date.parse(`${tail[2]} ${tail[3]}`) : NaN;
+    const rest = tail?.[4] ?? '';
+    return {
+      sender,
+      time: Number.isNaN(time) ? null : time,
+      status: /\bNot delivered\b|\bFailed\b/i.test(rest) ? 'failed' : /\bRead\b/.test(rest) ? 'read' : /\bDelivered\b/.test(rest) ? 'delivered' : /\bSending\b/i.test(rest) ? 'sending' : null,
+      encrypted: /End-to-end encrypted/i.test(rest),
+    };
+  }
+
+  // Every rendered message of a thread, oldest first: who sent it, the text,
+  // how many pictures, when, delivery status and encryption, plus how the
+  // conversation is carried. Opening the thread marks it read (and sends an
+  // RCS read receipt if those are on).
+  async function readMessages(id, { limit = 50 } = {}) {
+    return withOpenThread(id, async (list, thread) => {
+      const messages = [...list.querySelectorAll('mws-message-wrapper')].map((w) => {
+        const labelled = [w, ...w.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label')).find((l) => l && LABEL_TIME_RE.test(l));
+        const meta = parseMessageLabel(labelled);
+        const outgoing = w.getAttribute('is-outgoing') === 'true' || w.classList.contains('outgoing');
+        return {
+          direction: outgoing ? 'out' : 'in',
+          sender: outgoing ? 'You' : meta.sender ?? thread.name,
+          text: [...w.querySelectorAll('mws-text-message-part')].map((p) => p.innerText.trim()).filter(Boolean).join('\n'),
+          images: w.querySelectorAll('[data-e2e-message-image] img').length,
+          time: meta.time ?? null,
+          status: meta.status ?? null,
+          encrypted: !!meta.encrypted,
+        };
+      });
+      return { id, name: thread.name, channel: conversationChannel(), messages: messages.slice(-limit) };
+    });
   }
 
   // Read-only report of what the selectors match, for fixing them.
@@ -526,10 +586,64 @@
     };
   }
 
-  // Sends a text in a thread: open it, type into the compose box (a
-  // contenteditable; execCommand fires the input events Angular listens
-  // for), press Send, and wait for the message to show as sent. Used for
-  // the opt-in STOP reply to marketing. Goes back to the list afterwards.
+  // Back to the conversation (or list) that was showing before.
+  async function returnTo(previous) {
+    if (location.pathname === previous) return;
+    const back = threadId(previous) && findThread(threadId(previous));
+    if (back) realClick(back.link);
+    else {
+      history.back();
+      // "Start chat" leaves its picker in the history between the two.
+      const at = await waitFor(() => location.pathname === previous || /\/conversations\/new$/.test(location.pathname), 5000);
+      if (at && location.pathname !== previous) history.back();
+    }
+    // Don't return mid-navigation: the next open would click into it.
+    await waitFor(() => location.pathname === previous, 5000);
+  }
+
+  // Types a text into the open conversation's compose box (a contenteditable;
+  // execCommand fires the input events Angular listens for), presses Send,
+  // and waits for the message to show as sent.
+  async function sendInOpenThread(text) {
+    const box = await waitFor(() => [...document.querySelectorAll('[data-e2e-message-input-box], textarea[placeholder*="message" i]')].find(visible), 8000);
+    if (!box) throw new Error('Compose box not found');
+    // Outgoing messages carry is-outgoing="true" on their wrapper.
+    const outgoing = () =>
+      [...(document.querySelector(MESSAGES_SELECTOR)?.querySelectorAll('mws-message-wrapper[is-outgoing="true"]') ?? [])].filter((w) => w.innerText.includes(text)).length;
+    const before = outgoing();
+    if (globalThis.MessagesControlStandalone && globalThis.__mcSend) {
+      // The page only sends on trusted input events: the Node side types
+      // and clicks with a real keyboard and mouse.
+      const r = await globalThis.__mcSend({ type: 'sendText', text });
+      if (!r?.ok) throw new Error(r?.error ?? 'typing failed');
+    } else {
+      box.click();
+      box.focus();
+      if (box.isContentEditable) {
+        const range = document.createRange();
+        range.selectNodeContents(box);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('insertText', false, text);
+      } else {
+        box.value = text;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+      // There are two send buttons (one per message type); only one shows.
+      const send = await waitFor(() => {
+        const all = [...document.querySelectorAll('[data-e2e-send-text-button]'), ...document.querySelectorAll('button')].filter((x) => x.hasAttribute('data-e2e-send-text-button') || /^send/i.test(x.getAttribute('aria-label') ?? ''));
+        return all.find((b) => visible(b) && !b.disabled) ?? null;
+      }, 5000);
+      if (!send) throw new Error('Send button not found or disabled');
+      send.click();
+    }
+    if (!(await waitFor(() => outgoing() > before, 10000))) throw new Error('Message did not show as sent');
+  }
+
+  // Sends a text in a thread: open it, send, go back. Used for the opt-in
+  // STOP reply to marketing and by the API's send.
   async function sendText(id, text) {
     const previous = location.pathname;
     const thread = findThread(id);
@@ -537,49 +651,55 @@
     try {
       realClick(thread.link);
       if (!(await waitFor(() => isOpen(id), 5000))) throw new Error(`Could not open thread ${id}`);
-      const box = await waitFor(() => [...document.querySelectorAll('[data-e2e-message-input-box], textarea[placeholder*="message" i]')].find(visible), 8000);
-      if (!box) throw new Error('Compose box not found');
-      // Outgoing messages carry is-outgoing="true" on their wrapper.
-      const outgoing = () =>
-        [...(document.querySelector(MESSAGES_SELECTOR)?.querySelectorAll('mws-message-wrapper[is-outgoing="true"]') ?? [])].filter((w) => w.innerText.includes(text)).length;
-      const before = outgoing();
-      if (globalThis.MessagesControlStandalone && globalThis.__mcSend) {
-        // The page only sends on trusted input events: the Node side types
-        // and clicks with a real keyboard and mouse.
-        const r = await globalThis.__mcSend({ type: 'sendText', text });
-        if (!r?.ok) throw new Error(r?.error ?? 'typing failed');
-      } else {
-        box.click();
-        box.focus();
-        if (box.isContentEditable) {
-          const range = document.createRange();
-          range.selectNodeContents(box);
-          range.collapse(false);
-          const sel = window.getSelection();
-          sel.removeAllRanges();
-          sel.addRange(range);
-          document.execCommand('insertText', false, text);
-        } else {
-          box.value = text;
-          box.dispatchEvent(new Event('input', { bubbles: true }));
-        }
-        // There are two send buttons (one per message type); only one shows.
-        const send = await waitFor(() => {
-          const all = [...document.querySelectorAll('[data-e2e-send-text-button]'), ...document.querySelectorAll('button')].filter((x) => x.hasAttribute('data-e2e-send-text-button') || /^send/i.test(x.getAttribute('aria-label') ?? ''));
-          return all.find((b) => visible(b) && !b.disabled) ?? null;
-        }, 5000);
-        if (!send) throw new Error('Send button not found or disabled');
-        send.click();
-      }
-      if (!(await waitFor(() => outgoing() > before, 10000))) throw new Error('Message did not show as sent');
+      await sendInOpenThread(text);
       return true;
     } finally {
-      if (location.pathname !== previous) {
-        const back = threadId(previous) && findThread(threadId(previous));
-        if (back) realClick(back.link);
-        else history.back();
-        await waitFor(() => location.pathname === previous, 5000);
-      }
+      await returnTo(previous);
+    }
+  }
+
+  // A phone number reduced to its digits, without a leading US/Canada 1, so
+  // "+1 (555) 010-0142" and "555.010.0142" compare equal. Null for a name.
+  function phoneKey(s) {
+    if (!s || /[a-z]/i.test(s)) return null;
+    const d = s.replace(/\D/g, '');
+    if (d.length < 7) return null;
+    return d.length === 11 && d[0] === '1' ? d.slice(1) : d;
+  }
+
+  // The new-conversation picker: "Start chat" opens it, a number typed into
+  // its input offers a "Send to <number>" row. Not yet checked against the
+  // real page (2026-10); the mock copies this structure.
+  const START_CHAT = 'a[href*="/web/conversations/new"]';
+  const CONTACT_INPUT = '[data-e2e-contact-input], input[placeholder*="phone number" i]';
+
+  // Sends a text to a phone number: in the listed conversation whose name is
+  // that number, else through "Start chat", which also lands in an existing
+  // conversation with a saved contact who has that number. Standalone only:
+  // the Node side types the number and picks the row. Returns the thread.
+  async function sendToNumber(to, text) {
+    const want = phoneKey(to);
+    if (!want) throw new Error(`${to} is not a phone number`);
+    const listed = listThreads().filter((t) => phoneKey(t.name) === want);
+    if (listed.length === 1) {
+      await sendText(listed[0].id, text);
+      return { id: listed[0].id, name: listed[0].name, started: false };
+    }
+    if (!(globalThis.MessagesControlStandalone && globalThis.__mcSend)) throw new Error('starting a conversation needs the standalone runner');
+    const previous = location.pathname;
+    try {
+      const start = [...document.querySelectorAll(START_CHAT)].find(visible);
+      if (!start) throw new Error('"Start chat" not found');
+      realClick(start);
+      if (!(await waitFor(() => [...document.querySelectorAll(CONTACT_INPUT)].find(visible), 8000))) throw new Error('The new-conversation picker did not open');
+      const r = await globalThis.__mcSend({ type: 'startChat', to });
+      if (!r?.ok) throw new Error(r?.error ?? 'picking the number failed');
+      const id = await waitFor(() => threadId(location.pathname), 10000);
+      if (!id) throw new Error(`No conversation with ${to} opened`);
+      await sendInOpenThread(text);
+      return { id, name: findThread(id)?.name ?? to, started: true };
+    } finally {
+      await returnTo(previous);
     }
   }
 
@@ -631,5 +751,5 @@
   const unblockThread = (name) => undoInDialog('Spam & blocked', name, /^(unblock|not spam)$/i);
   const unarchiveThread = (name) => undoInDialog('Archived', name, /^unarchive$/i);
 
-  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor, sleep };
+  globalThis.MessagesDom = { ageDays, messageTime, loadAllThreads, listThreads, readThread, readMessages, parseMessageLabel, conversationChannel, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, sendToNumber, phoneKey, markThread, diagnose, waitFor, sleep };
 })();

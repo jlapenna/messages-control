@@ -29,7 +29,10 @@ npm run test:desktop
 Unit tests cover policy rules, classifier parsing and failure handling,
 storage, events, notifications, digests and the local API. Integration tests
 run the real CLI and page driver in headless Chromium against a synthetic
-Messages page: scan, block, STOP + trash, undo, keep and status. They also
+Messages page: scan, block, STOP + trash, undo, keep and status, and, with the
+`run` watcher, message events (query, stream, restart catch-up), reading a
+conversation back with its channel, and sending to a thread or a phone
+number from the API and the CLI. They also
 exercise the rendered extension settings with a simulated permission prompt.
 The desktop test exercises the downloader's proxy bootstrap and artifact
 validation against a local HTTP fixture. All three suites run in CI's
@@ -83,11 +86,13 @@ verify the desktop proxy fixture when changing its downloader dependencies.
 
 ## Source layout
 
-- `messages-dom.js`: Google Messages DOM driver (list, read, delete, block,
-  archive, diagnose). No `chrome.*` APIs.
+- `messages-dom.js`: Google Messages DOM driver (list, read, send, delete,
+  block, archive, diagnose). No `chrome.*` APIs.
 - `content.js`: new-thread detection and the classify → act flow. Uses
   `chrome.runtime.sendMessage` and `chrome.storage.local`.
 - `policy.js`: the classification rules; plain script shared by the page and Node.
+- `message-events.js`: standalone only. Reports new messages in the list as
+  events and answers the API's thread queries and sends.
 - `src/page-shim.js`: the slice of `chrome.*` those two use, backed by Node;
   `src/cli.js` injects shim + driver + content.js into the page.
 - `src/backend.js`: the LLM call and the log. `src/store.js`:

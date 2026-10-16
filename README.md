@@ -7,6 +7,8 @@ Google Messages for web and runs as a standalone CLI or a Chrome extension.
 - Block and report spam, or delete it instead.
 - Delete marketing conversations and optionally send a STOP reply.
 - Review activity in a dashboard, undo blocks and archives, and generate digests.
+- Follow new messages from every sender, read conversations and send texts
+  through a local API.
 
 **Experimental:** Messages Control automates the Google Messages web interface.
 Changes to that interface can break it, and classification can make mistakes.
@@ -107,7 +109,8 @@ information to Google; optional STOP replies, notifications and digests send
 data to their configured recipients.
 
 Configuration contains credentials. The standalone runner stores its browser
-profile, message state and activity previews under `~/.local/state/messages-control/`.
+profile, message state, activity previews and the previews of new messages
+from every sender (kept 30 days by default, `messageRetentionDays`) under `~/.local/state/messages-control/`.
 The extension stores its settings in your Chrome profile.
 Protect those files and their backups. Do not put real messages, keys or
 browser profiles in bug reports. See [SECURITY.md](SECURITY.md) for private

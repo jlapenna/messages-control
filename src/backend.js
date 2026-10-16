@@ -38,12 +38,14 @@ function extractOf(raw) {
 }
 
 export class Backend {
-  constructor({ store, settings, context = null, page = null, onLog = () => {}, onFatal = () => {} }) {
+  constructor({ store, settings, context = null, page = null, onLog = () => {}, onMessage = () => {}, onFatal = () => {} }) {
     this.store = store;
     this.settings = settings;
     this.context = context;
     this.page = page;
     this.onLog = onLog;
+    // A new message seen in the conversation list (standalone runner only).
+    this.onMessage = onMessage;
     // Consecutive classify failures; a run of them means the endpoint is
     // down, not one bad message.
     this.onFatal = onFatal;
@@ -77,6 +79,9 @@ export class Backend {
         }
         case 'log':
           await this.appendLog(msg.entry);
+          return { ok: true };
+        case 'message':
+          this.onMessage(msg.event ?? {});
           return { ok: true };
         case 'clearLog':
           await this.withLog(() => {
