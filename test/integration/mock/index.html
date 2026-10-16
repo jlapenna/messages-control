@@ -30,6 +30,7 @@
 <body>
 <div>
   <button aria-label="Main menu" id="main-menu">☰</button>
+  <a href="/web/conversations/new" id="start-chat">Start chat</a>
   <mws-conversations-list id="list"></mws-conversations-list>
   <button class="load-more hidden" id="load-more">Load more conversations</button>
 </div>
@@ -55,7 +56,8 @@
   function renderList() {
     const list = $('#list');
     list.innerHTML = '';
-    const visible = state.threads.filter((t) => !t.gone);
+    // A conversation started but not yet written to is not listed.
+    const visible = state.threads.filter((t) => !t.gone && !t.draft);
     for (const t of visible.slice(0, shown)) {
       const item = document.createElement('mws-conversation-list-item');
       item.dataset.id = t.id;
@@ -149,7 +151,7 @@
       return;
     }
     main.innerHTML = `<h1>${t.name}</h1><mws-messages-list></mws-messages-list>
-      <div data-e2e-message-input-box contenteditable="true" role="textbox" aria-label="Type a message to ${t.name}" placeholder="Text message"></div>
+      <div data-e2e-message-input-box contenteditable="true" role="textbox" aria-label="Type a message to ${t.name}" placeholder="${t.rcs ? 'RCS message' : 'Text message'}"></div>
       <button data-e2e-send-text-button aria-label="Send message">Send</button>`;
     const list = $('mws-messages-list', main);
     for (const m of t.messages) {
@@ -162,6 +164,10 @@
       }
       const w = document.createElement('mws-message-wrapper');
       w.setAttribute('is-outgoing', m.outgoing ? 'true' : 'false');
+      // The real page's accessible label: who, what, when, delivery, encryption.
+      const said = m.outgoing ? (m.image && !m.text ? 'You sent an image' : `You said: ${m.text}`) : `${t.name} said: ${m.text ?? ''}`;
+      const when = `${m.outgoing ? 'Sent' : 'Received'} on ${m.at ?? 'October 15, 2026 at 12:00 PM'}.`;
+      w.setAttribute('aria-label', [`${said}.`, when, m.status ? `${m.status}.` : '', t.rcs ? 'End-to-end encrypted.' : ''].filter(Boolean).join(' '));
       if (m.image) w.innerHTML = `<div data-e2e-message-image><img alt=""></div>`;
       if (m.text) {
         const part = document.createElement('mws-text-message-part');
@@ -183,10 +189,35 @@
     });
   }
 
+  // "Start chat": a number typed into the input offers "Send to <number>",
+  // which opens the conversation with it.
+  function renderNew() {
+    const main = $('#main');
+    main.innerHTML = `<h1>New conversation</h1><input data-e2e-contact-input placeholder="Type a name, phone number, or email"><div class="picks"></div>`;
+    const input = $('input', main);
+    input.addEventListener('input', () => {
+      const picks = $('.picks', main);
+      picks.innerHTML = '';
+      const to = input.value.trim();
+      if (to.replace(/\D/g, '').length < 7) return;
+      const b = document.createElement('button');
+      b.setAttribute('data-e2e-send-to-button', '');
+      b.textContent = `Send to ${to}`;
+      b.addEventListener('click', async () => {
+        const { id } = await (await post({ action: 'start', to })).json();
+        state = await (await fetch('/__state')).json();
+        history.pushState({}, '', `/web/conversations/${id}`);
+        render();
+      });
+      picks.append(b);
+    });
+  }
+
   function render() {
     renderList();
     const id = route();
-    if (id) renderThread(id);
+    if (id === 'new') renderNew();
+    else if (id) renderThread(id);
     else $('#main').innerHTML = '<p>Pick a conversation.</p>';
   }
 
@@ -230,6 +261,11 @@
     }
     document.body.append(nav);
   });
+  $('#start-chat').addEventListener('click', (e) => {
+    e.preventDefault();
+    history.pushState({}, '', '/web/conversations/new');
+    render();
+  });
   $('#load-more').addEventListener('click', () => {
     shown += PAGE;
     renderList();
@@ -243,6 +279,14 @@
       state = s;
       render();
     });
+  // Texts arriving on the phone (server.arrive): Google pushes them into the
+  // list without a reload. Only the list re-renders, like the real page.
+  setInterval(async () => {
+    const { version } = await (await fetch('/__version')).json();
+    if (version === state.version) return;
+    state = await (await fetch('/__state')).json();
+    renderList();
+  }, 500);
 })();
 </script>
 </body>

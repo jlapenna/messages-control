@@ -151,6 +151,10 @@ export const DEFAULTS = {
   // hosts: the extra names requests may carry then (the proxy's public name,
   // the machine's tailnet name). /api/* stays behind the token either way.
   api: { bind: '127.0.0.1', port: 7373, token: '', hosts: [] },
+  // Standalone only: every new message in the conversation list (saved
+  // contacts included) is recorded for /api/messages and its stream, and
+  // kept this many days. 0 records nothing.
+  messageRetentionDays: 30,
   prompt: DEFAULT_PROMPT,
 };
 

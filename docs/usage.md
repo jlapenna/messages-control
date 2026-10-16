@@ -14,6 +14,7 @@
 | `check-pictures` | open every pending picture thread and classify it |
 | `diagnose` | what the page driver can see (thread count, menu found) |
 | `log [--limit N]`, `clear-log` | the activity log |
+| `messages [--since 24h] [--thread ID] [--limit N] [--json]` | new messages the watcher saw arrive, every sender (see [Message events](#message-events-and-queries)) |
 | `status` | config, pairing, last scan, actions in the last 24 h, service state |
 | `init`, `test-classifier` | write the config; send sample texts to the LLM |
 | `version` | print the package version and, from a git checkout, the short commit |
@@ -21,7 +22,7 @@
 | `review` | List threads held for manual review. |
 | `act ID ACTION` | Apply block, trash, archive or keep to a selected thread. |
 | `undo EVENT` | Reverse a block or archive by its event number. |
-| `send ID TEXT --live` | Send a message to a selected thread. |
+| `send ID TEXT --live`, `send --to NUMBER TEXT --live` | Send a text to a thread, or to a phone number (its conversation or a new one). With the watcher running, this goes through its API. |
 | `digest [--send]` | Display a digest, or send it to notification destinations. |
 | `policy show`, `policy test` | Display rules or evaluate them against cached verdicts. |
 
@@ -49,6 +50,7 @@ The default locations also respect `XDG_CONFIG_HOME` and `XDG_STATE_HOME`.
 | `openPictureThreads` | `true` | open picture threads so the model sees them (marks them read) |
 | `unsubscribeMarketing` | `false` | reply `unsubscribeText` (`STOP`) to a marketing sender before trashing its thread |
 | `notifyCommand` | | shell command run on every action and failure, with `MC_EVENT` and `MC_MESSAGE` set |
+| `messageRetentionDays` | `30` | standalone: days new-message previews are kept for `/api/messages`; `0` records none |
 | `prompt` | see `settings.js` | the classifier instructions |
 
 ## Policies
@@ -157,6 +159,48 @@ other `Host` headers are refused; `/api/*` keeps its token.
   `POST /api/scan {includeSeen, checkPictures, trashSpam, processAll}` —
   all behind `Authorization: Bearer <api.token>`. The token is generated on
   the first run and written to the config; the dashboard asks for it once.
+- `/api/messages`, `/api/messages/stream`, `/api/threads`,
+  `/api/threads/:id/messages`, `POST /api/send` — message events, queries
+  and sending, below.
+
+### Message events and queries
+
+The watcher records every new message that reaches the top of the
+conversation list, from any sender (saved contacts too), RCS and SMS/MMS
+alike, because it reads Messages for web rather than the carrier. A new
+message is a changed preview: two identical texts in a row count once, and
+the first look at an inbox is the baseline, not events. Previews (up to 500
+characters) are kept `messageRetentionDays`. Messages that arrive while the
+watcher is down are recorded when it comes back.
+
+- `GET /api/messages?after&since&thread&direction&q&limit` — recorded
+  messages: `{id, time, threadId, name, direction: "in"|"out", text, unread,
+  listTime, msgTime}`. Newest first; with `after=ID`, the ones after that id
+  oldest first, for following along. `q` matches the text or the name.
+- `GET /api/messages/stream?after&thread&direction` — the same as
+  server-sent events (`event: message`, `id:` the row id). Reconnecting with
+  `Last-Event-ID` or `after` replays what was missed. For example:
+  `curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7373/api/messages/stream`.
+- `GET /api/threads?q&limit` — the conversation list as the page shows it:
+  `{id, name, snippet, timestamp, msgTime, unread}`.
+- `GET /api/threads/:id/messages?limit` — opens one conversation and returns
+  `{id, name, channel: "rcs"|"sms"|null, messages: [{direction, sender, text,
+  images, time, status, encrypted}]}`, oldest first, read from the page's
+  message labels. Opening marks the conversation read and sends an RCS read
+  receipt if those are on. 404 if the thread is not in the loaded list, 409
+  while a scan holds the page.
+- `POST /api/send {thread, text}` or `{to, text}` — sends one text (a single
+  line, up to 2000 characters) now, from the phone, to a thread id (or unique prefix) or a phone number. A number
+  goes to the listed conversation whose name is that number, else through
+  "Start chat", which opens the existing conversation with a saved contact
+  who has it, or a new one. Answers `{ok, sent: {id, name, started, text},
+  row}` once the page shows the message as sent; the send is in the
+  activity log, and the watcher records it as an outgoing message. Dry run
+  does not apply: the request is the authorization, so keep the token
+  private. 400 for a bad request, 404 for an unknown thread, 409 otherwise
+  (busy page, or the message did not show as sent; check the conversation
+  before retrying, since it may still have gone out). Starting a
+  conversation has only been tested against the mock page.
 
 Prometheus scrape config:
 
@@ -196,7 +240,8 @@ Use `messages-control uninstall-service` to remove the service and digest timer.
 `~/.local/state/messages-control/`: `profile/` (the browser, with the
 pairing), `state.json` (what the page keeps: seen threads, verdict cache,
 the recent log) and `state.db` (SQLite: an append-only `events` table with
-every log entry and the rule that produced it, and a `verdicts` table
+every log entry and the rule that produced it, a `messages` table of the new
+messages seen, pruned after `messageRetentionDays`, and a `verdicts` table
 mirrored from the cache). `log` and `status` read `state.db`; `clear-log`
 clears only the page's recent log.
 

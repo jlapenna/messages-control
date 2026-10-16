@@ -38,6 +38,7 @@
     "src",
     "content.js",
     "messages-dom.js",
+    "message-events.js",
     "settings.js",
     "README.md",
     "LICENSE"

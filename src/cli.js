@@ -12,16 +12,18 @@ import { Db } from './db.js';
 import { eventDetails } from './event-details.js';
 import { notify as sendNotification } from './notify.js';
 import { digestText, parseSince } from './digest.js';
-import { startApi } from './api.js';
+import { sendRequest, startApi } from './api.js';
 import { randomBytes } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { Backend } from './backend.js';
 import { launchBrowser } from './browser.js';
 import { versionText } from './version.js';
 import { LIST, MESSAGES_URL, pair, pairingState, resumePairing, waitForPairing, waitForState } from './pair.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-// The extension's page-side code, unchanged, behind a chrome.* shim.
-const PAGE_SCRIPTS = ['src/page-shim.js', 'messages-dom.js', 'policy.js', 'content.js'].map((f) =>
+// The extension's page-side code, unchanged, behind a chrome.* shim, plus the
+// standalone-only message events and thread queries.
+const PAGE_SCRIPTS = ['src/page-shim.js', 'messages-dom.js', 'policy.js', 'content.js', 'message-events.js'].map((f) =>
   fs.readFileSync(path.join(root, f), 'utf8'),
 );
 
@@ -45,6 +47,8 @@ Commands (default: run)
   check-pictures   open every pending picture thread and classify it
   diagnose         print what the page driver can see
   log [--limit N]  print the activity log (newest first)
+  messages         new messages seen arriving, every sender (newest first;
+                   --since 24h, --thread ID, --limit N, --json)
   clear-log        empty the activity log
   version          print the package version and the git commit
   status           pairing, last scan, actions in the last 24 h, service state
@@ -59,6 +63,10 @@ Commands (default: run)
                    prefix; block/trash/archive need --live)
   send ID TEXT     send a text in one thread (--live); the path the opt-in
                    STOP reply to marketing uses
+  send --to NUMBER TEXT
+                   send a text to a phone number (--live), in its
+                   conversation or a new one; both go through the running
+                   watcher's API when it runs
   undo EVENT       undo a block or an archive by its event number (from
                    log); a trashed thread has no undo in Messages for web
   policy show      the rules in force (defaults, mode and config applied)
@@ -68,6 +76,7 @@ Commands (default: run)
 Options
   --digest HH:MM   with install-service: also a daily digest timer
   --since 24h      for digest (h, d or m)
+  --to NUMBER      for send: a phone number instead of a thread ID
   --send           for digest: send it through the notify channels
   --headed         show the browser window
   --live           act on spam and marketing; the default is a dry run
@@ -87,7 +96,7 @@ To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
   'run', 'pair', 'scan', 'sweep', 'act-on-spam', 'check-pictures', 'diagnose', 'log', 'clear-log',
-  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo', 'send', 'version',
+  'status', 'init', 'test-classifier', 'install-service', 'uninstall-service', 'policy', 'digest', 'review', 'act', 'undo', 'send', 'version', 'messages',
 ]);
 
 const { values: flags, positionals } = parseArgs({
@@ -101,6 +110,9 @@ const { values: flags, positionals } = parseArgs({
     'state-dir': { type: 'string', default: STATE_DIR },
     limit: { type: 'string', default: '50' },
     since: { type: 'string' },
+    thread: { type: 'string' },
+    to: { type: 'string' },
+    json: { type: 'boolean', default: false },
     send: { type: 'boolean', default: false },
     digest: { type: 'string' },
     endpoint: { type: 'string' },
@@ -322,6 +334,34 @@ function runningPid() {
   }
 }
 
+// The running watcher holds the browser profile; its API sends for us.
+async function sendViaWatcher(settings, msg) {
+  const { bind, port, token } = settings.api ?? {};
+  if (!(port > 0) || !token) {
+    console.error('The watcher is running without its API (api.port, api.token); stop it to send directly.');
+    process.exit(EXIT_ERROR);
+  }
+  const host = bind === '0.0.0.0' || !bind ? '127.0.0.1' : bind === '::' ? '[::1]' : bind.includes(':') ? `[${bind}]` : bind;
+  const res = await fetch(`http://${host}:${port}/api/send`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ thread: msg.thread, to: msg.to, text: msg.text }),
+  }).catch((err) => ({ ok: false, json: async () => ({ error: `watcher API unreachable: ${err.message}` }) }));
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    console.error(body.error ?? `watcher API answered ${res.status}`);
+    process.exit(EXIT_ERROR);
+  }
+  console.log(formatEntry(body.row));
+}
+
+function printMessages(db, { since, thread, limit, json }) {
+  const rows = db.messages({ since: since ? Date.now() - parseSince(since) : 0, thread: thread || null, limit });
+  if (json) return console.log(JSON.stringify(rows, null, 2));
+  for (const m of rows) console.log(`#${String(m.id).padEnd(5)} ${stamp(m.time)} ${m.direction === 'out' ? '→' : '←'} ${m.name ?? m.threadId}: ${m.text ?? ''}`);
+  if (!rows.length) console.log('(no messages recorded; the watcher records them while it runs)');
+}
+
 function printLog(db, limit) {
   const rows = db.events({ limit }).map((r) => ({ ...r }));
   for (const entry of rows) console.log(`#${String(entry.id).padEnd(5)} ${formatEntry(entry)}${entry.rule ? ` [${entry.rule}]` : ''}`);
@@ -370,7 +410,7 @@ async function status(settings, store, db) {
 }
 
 async function main() {
-  if (flags.help || !COMMANDS.has(command) || (command === 'act' && !(positionals[1] && /^(block|trash|archive|keep)$/.test(positionals[2] ?? ''))) || (command === 'undo' && !/^#?\d+$/.test(positionals[1] ?? '')) || (command === 'send' && !(positionals[1] && positionals[2]))) {
+  if (flags.help || !COMMANDS.has(command) || (command === 'act' && !(positionals[1] && /^(block|trash|archive|keep)$/.test(positionals[2] ?? ''))) || (command === 'undo' && !/^#?\d+$/.test(positionals[1] ?? '')) || (command === 'send' && !(flags.to ? positionals[1] : positionals[1] && positionals[2]))) {
     console.log(USAGE);
     process.exit(flags.help ? 0 : 2);
   }
@@ -388,6 +428,7 @@ async function main() {
   // First run with a database: carry over the page's recent log.
   if (db.counts(0).total === 0) for (const e of [...(store.get('log').log ?? [])].reverse()) db.recordEvent(e);
   if (command === 'log') return printLog(db, Number(flags.limit) || 50);
+  if (command === 'messages') return printMessages(db, { since: flags.since, thread: flags.thread, limit: Number(flags.limit) || 50, json: flags.json });
   if (command === 'clear-log') {
     // Clears the page's recent log and the last scan; the events table is
     // the audit trail and stays.
@@ -408,6 +449,21 @@ async function main() {
   }
   if (command === 'policy') return policyCommand(settings, store, positionals[1] ?? 'show');
   if (command === 'review') return review(settings, store, db);
+
+  // send: one profile, so with the watcher running it goes through its API.
+  let sendMsg = null;
+  if (command === 'send') {
+    if (!flags.live) {
+      console.error('Sending needs --live.');
+      process.exit(EXIT_ERROR);
+    }
+    sendMsg = sendRequest({ thread: flags.to ? null : positionals[1], to: flags.to, text: positionals.slice(flags.to ? 1 : 2).join(' ') });
+    if (sendMsg.error) {
+      console.error(sendMsg.error);
+      process.exit(EXIT_ERROR);
+    }
+    if (runningPid()) return sendViaWatcher(settings, sendMsg);
+  }
 
   const running = runningPid();
   if (running) {
@@ -437,6 +493,20 @@ async function main() {
   process.on('SIGINT', () => shutdown());
   process.on('SIGTERM', () => shutdown());
 
+  // New messages, as recorded, for the API's stream. Message text is kept
+  // only messageRetentionDays (0: not recorded at all).
+  const messageEvents = new EventEmitter();
+  messageEvents.setMaxListeners(0);
+  const pruneMessages = () => {
+    if (!(settings.messageRetentionDays > 0)) return;
+    try {
+      db.pruneMessages(Date.now() - settings.messageRetentionDays * 86400000);
+    } catch (err) {
+      console.warn('messages not pruned:', err.message);
+    }
+  };
+  pruneMessages();
+  setInterval(pruneMessages, 3600000).unref();
   const backend = new Backend({
     store,
     settings,
@@ -450,6 +520,14 @@ async function main() {
       }
       console.log(formatEntry(entry));
       if (ACTED.test(entry.outcome ?? '')) notify(settings, 'action', formatEntry(entry));
+    },
+    onMessage: (event) => {
+      if (!(settings.messageRetentionDays > 0) || !event.threadId) return;
+      try {
+        messageEvents.emit('message', db.recordMessage(event));
+      } catch (err) {
+        console.warn('message not recorded:', err.message);
+      }
     },
     onFatal: (message) => fatal('llm-failing', message, EXIT_LLM),
   });
@@ -467,7 +545,31 @@ async function main() {
       return { ok: false, error: err.message.split('\n')[0] };
     }
   }
-  await page.exposeFunction('__mcSend', (msg) => (msg.type === 'sendText' ? typeAndSend(String(msg.text ?? '')) : backend.handle(msg)));
+  // Starting a conversation: type the number into the picker's input and
+  // pick the "Send to <number>" row it offers (messages-dom.js sendToNumber).
+  async function startChat(to) {
+    try {
+      const input = page.locator('[data-e2e-contact-input]:visible, input[placeholder*="phone number" i]:visible').first();
+      await input.click({ timeout: 5000 });
+      await page.keyboard.type(to);
+      const row = page
+        .locator('[data-e2e-send-to-button]:visible')
+        .or(page.getByRole('button', { name: /^send to\b/i }))
+        .or(page.getByRole('option', { name: /^send to\b/i }))
+        .first();
+      // Only the row for this number: a contact suggested in its place would
+      // be the wrong recipient.
+      const want = to.replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
+      const offered = (await row.innerText({ timeout: 8000 })).replace(/\D/g, '');
+      if (!offered.endsWith(want)) return { ok: false, error: `the picker offered "${offered}", not ${to}` };
+      await row.click({ timeout: 8000 });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message.split('\n')[0] };
+    }
+  }
+  const pageCalls = { sendText: (msg) => typeAndSend(String(msg.text ?? '')), startChat: (msg) => startChat(String(msg.to ?? '')) };
+  await page.exposeFunction('__mcSend', (msg) => (pageCalls[msg.type] ?? ((m) => backend.handle(m)))(msg));
   await page.exposeFunction('__mcStorage', (op, arg) => {
     const res = store[op](arg) ?? {};
     // Keep the queryable copy of the verdicts current.
@@ -563,7 +665,7 @@ async function main() {
     diagnose: { type: 'diagnose' },
     undo: undoMsg,
     act: { type: 'act', id: positionals[1], action: positionals[2], live: flags.live },
-    send: { type: 'send', id: positionals[1], text: positionals.slice(2).join(' '), live: flags.live },
+    send: sendMsg && { type: 'sendMessage', ...sendMsg },
     scan: { type: 'scanNow', includeSeen: flags['include-seen'] },
     sweep: { type: 'scanNow', processAll: true },
     'act-on-spam': { type: 'scanNow', trashSpam: true },
@@ -601,7 +703,7 @@ async function main() {
       return { ok: alive && paired, alive, paired, pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) };
     };
     try {
-      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, policy: loadPolicy() });
+      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, messageEvents, policy: loadPolicy() });
     } catch (err) {
       console.warn(`API not started (${err.message}); healthz and the dashboard are off.`);
     }
@@ -642,8 +744,8 @@ async function main() {
   const reloadEvery = Math.max(1, Number(settings.reloadMinutes) || 20) * 60000;
   setInterval(async () => {
     if (exiting || mending) return;
-    const scanning = await page.evaluate(() => !!globalThis.MessagesControlScanning).catch(() => true);
-    if (scanning) return;
+    const busy = await page.evaluate(() => !!(globalThis.MessagesControlScanning || globalThis.MessagesControlReading)).catch(() => true);
+    if (busy) return;
     await page.reload({ waitUntil: 'domcontentloaded' }).catch((err) => console.warn('reload failed:', err.message));
   }, reloadEvery);
   // Test hook: pretend the phone unpaired us after N seconds, to exercise the
