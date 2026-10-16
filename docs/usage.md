@@ -177,6 +177,9 @@ watcher is down are recorded when it comes back.
   messages: `{id, time, threadId, name, direction: "in"|"out", text, unread,
   listTime, msgTime}`. Newest first; with `after=ID`, the ones after that id
   oldest first, for following along. `q` matches the text or the name.
+  `direction` comes from the preview's "You:" prefix, so an incoming text
+  that itself starts with "You:" is recorded as outgoing; the conversation
+  read below has the page's own marker.
 - `GET /api/messages/stream?after&thread&direction` — the same as
   server-sent events (`event: message`, `id:` the row id). Reconnecting with
   `Last-Event-ID` or `after` replays what was missed. For example:
@@ -200,7 +203,8 @@ watcher is down are recorded when it comes back.
   private. 400 for a bad request, 404 for an unknown thread, 409 otherwise
   (busy page, or the message did not show as sent; check the conversation
   before retrying, since it may still have gone out). Starting a
-  conversation has only been tested against the mock page.
+  conversation has only been tested against the mock page. Sends and
+  conversation reads that arrive together take turns on the page, in order.
 
 Prometheus scrape config:
 

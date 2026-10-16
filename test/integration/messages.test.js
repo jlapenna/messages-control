@@ -188,6 +188,16 @@ test('a text sent to a thread goes out and comes back as an outgoing message', a
   assert.deepEqual([byNumber.sent?.id, byNumber.sent?.started], ['t-friend', false], JSON.stringify(byNumber));
 });
 
+test('sends that arrive together go out one at a time, each to its own thread', async () => {
+  const [a, b] = await Promise.all([
+    post('/api/send', { thread: 't-friend', text: 'first of two' }).then((r) => r.json()),
+    post('/api/send', { thread: 't-rcs', text: 'second of two' }).then((r) => r.json()),
+  ]);
+  assert.deepEqual([a.ok, a.sent?.id, b.ok, b.sent?.id], [true, 't-friend', true, 't-rcs'], JSON.stringify([a, b]));
+  const sends = mock.actions().filter((x) => x.action === 'send' && /of two$/.test(x.text)).map((x) => [x.id, x.text]);
+  assert.deepEqual(sends, [['t-friend', 'first of two'], ['t-rcs', 'second of two']]);
+});
+
 test('a text to a new number starts a conversation', async () => {
   const res = await post('/api/send', { to: '+1 555-010-0163', text: 'This is the new number' });
   const body = await res.json();
