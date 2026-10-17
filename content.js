@@ -143,14 +143,23 @@
     if (!/^You:/.test(t.text ?? '')) return false;
     const { messages } = await readMessages(t.id, { limit: 1 });
     const own = messages.at(-1)?.direction === 'out';
-    if (own) {
+    if (!own) return false;
+    // A failed save only costs another look after the next reload; the
+    // direction is already known.
+    try {
       await loadOwnPreviews();
-      ownPreviews[t.id] = { text: t.text, msgTime: t.msgTime, timestamp: t.timestamp, time: Date.now() };
-      const entries = Object.entries(ownPreviews);
-      if (entries.length > OWN_LIMIT) ownPreviews = Object.fromEntries(entries.sort((a, b) => b[1].time - a[1].time).slice(0, OWN_LIMIT));
-      await chrome.storage.local.set({ [OWN_KEY]: ownPreviews });
+    } catch (err) {
+      console.warn('[messages-control] could not load own previews', err);
     }
-    return own;
+    ownPreviews[t.id] = { text: t.text, msgTime: t.msgTime, timestamp: t.timestamp, time: Date.now() };
+    const entries = Object.entries(ownPreviews);
+    if (entries.length > OWN_LIMIT) ownPreviews = Object.fromEntries(entries.sort((a, b) => b[1].time - a[1].time).slice(0, OWN_LIMIT));
+    try {
+      await chrome.storage.local.set({ [OWN_KEY]: ownPreviews });
+    } catch (err) {
+      console.warn('[messages-control] could not save own previews', err);
+    }
+    return true;
   }
   const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
 
