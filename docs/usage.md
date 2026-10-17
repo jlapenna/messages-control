@@ -207,7 +207,9 @@ watcher is down are recorded when it comes back.
   (busy page, or the message did not show as sent; check the conversation
   before retrying, since it may still have gone out). A new number's
   conversation is listed as soon as it is opened, so a send that fails after
-  that leaves it empty in the list. Sends and
+  that leaves it empty in the list. Its "Texting with …" banner is not
+  recorded as a message; a first text from a new sender that reads exactly
+  like that banner is not recorded either. Sends and
   conversation reads that arrive together take turns on the page, in order.
 
 Prometheus scrape config:
