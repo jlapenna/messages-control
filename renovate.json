@@ -9,5 +9,14 @@
       "bot:renovate",
       "type:security"
     ]
-  }
+  },
+  "packageRules": [
+    {
+      "description": "undici is overridden only to patch nx's exact undici 7.29.0 pin (package.json overrides). Keep the override on nx's own major: Renovate's 8.x bump (#51) both crosses nx's tested major and, through the hosted lock regeneration, drops the peer-installed undici so npm ci fails. Lift this when nx depends on undici 8.",
+      "matchPackageNames": [
+        "undici"
+      ],
+      "allowedVersions": "<8"
+    }
+  ]
 }
