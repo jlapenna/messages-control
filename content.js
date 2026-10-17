@@ -120,23 +120,36 @@
   // a reply) is never judged: blocking it would block the person you wrote
   // to. The list previews your messages as "You: …", but a sender can type
   // that too, so the preview only prompts a look; the opened message's
-  // is-outgoing flag decides. Confirmed previews are remembered by text.
-  const ownPreviews = new Map();
-  // Matched by preview and message time (within the list's rounding, as
-  // in cached()), so a later message with the same words is looked at again.
+  // is-outgoing flag decides. Confirmed previews are kept in storage (the
+  // standalone runner reloads the page every 20 minutes).
+  const OWN_KEY = 'ownPreviews';
+  const OWN_LIMIT = 500;
+  let ownPreviews = {};
+  async function loadOwnPreviews() {
+    ({ [OWN_KEY]: ownPreviews = {} } = await chrome.storage.local.get(OWN_KEY));
+  }
+  // Matched by preview and message time, as cached() matches verdicts: the
+  // list rounds an older message's time down ("Friday"), and a newer message
+  // with the same words is looked at again.
   const isOwnMessage = (t) => {
-    const o = ownPreviews.get(t.id);
+    const o = ownPreviews[t.id];
     if (!o || o.text !== t.text) return false;
     // No time on either side: the list's own label must match exactly, and
     // with no label at all the direction is looked up again.
     if (o.msgTime == null || t.msgTime == null) return !!o.timestamp && o.timestamp === t.timestamp;
-    return Math.abs(t.msgTime - o.msgTime) <= STALE_SLACK_MS;
+    return t.msgTime <= o.msgTime + STALE_SLACK_MS;
   };
   async function confirmOwnMessage(t) {
     if (!/^You:/.test(t.text ?? '')) return false;
     const { messages } = await readMessages(t.id, { limit: 1 });
     const own = messages.at(-1)?.direction === 'out';
-    if (own) ownPreviews.set(t.id, { text: t.text, msgTime: t.msgTime, timestamp: t.timestamp });
+    if (own) {
+      await loadOwnPreviews();
+      ownPreviews[t.id] = { text: t.text, msgTime: t.msgTime, timestamp: t.timestamp, time: Date.now() };
+      const entries = Object.entries(ownPreviews);
+      if (entries.length > OWN_LIMIT) ownPreviews = Object.fromEntries(entries.sort((a, b) => b[1].time - a[1].time).slice(0, OWN_LIMIT));
+      await chrome.storage.local.set({ [OWN_KEY]: ownPreviews });
+    }
     return own;
   }
   const OWN_ROW = { label: 'contact', outcome: 'not checked: your own message' };
@@ -406,6 +419,7 @@
       }
 
       let { seen, baselined } = await loadSeen();
+      await loadOwnPreviews();
       const notes = [];
       // 2: the first sweep missed the real page's "Load more conversations".
       const SWEEP_VERSION = 2;

@@ -137,3 +137,13 @@ test('a harmless follow-up does not hide the pitch before it', async () => {
   const asked = mock.llm().find((q) => q.text.includes(followUp));
   assert.match(asked?.text ?? '', /Claim now/, 'the earlier preview reached the classifier');
 });
+
+test('your own message is checked once, not again after the page reloads', async () => {
+  // Each CLI run is a fresh page, as after the runner's 20-minute reload.
+  const own = () => events().filter((e) => e.thread_id === 't-own-invite').length;
+  const before = own();
+  assert.ok(before >= 1, 'the first scan checked it');
+  await cli('scan', '--live');
+  assert.equal(own(), before, 'the confirmation outlived the page');
+  assert.deepEqual(byId(mock.actions(), 't-own-invite'), []);
+});
