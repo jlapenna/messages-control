@@ -43,14 +43,16 @@ export async function startMock({ threads = [], port = 0 } = {}) {
   // What the phone would remember between page loads.
   function apply(a) {
     // "Start chat" with a number: the conversation with whoever has it (a
-    // saved contact's included), else a new one that is listed once it has
-    // a message.
+    // saved contact's included), else a new one, listed at once at the top
+    // with only its banner, as the real page does (2026-10).
     if (a.action === 'start') {
       const key = phoneKey(a.to);
       let t = state.threads.find((x) => !x.gone && /\d/.test(key) && (phoneKey(x.phone) === key || (!/[a-z]/i.test(x.name) && phoneKey(x.name) === key)));
       if (!t) {
-        t = { id: `t-new-${key}`, name: a.to, draft: true, snippet: '', timestamp: '', messages: [] };
-        state.threads.push(t);
+        const banner = `Texting with ${a.to} (SMS/MMS)`;
+        t = { id: `t-new-${key}`, name: a.to, snippet: banner, timestamp: 'Now', messages: [{ banner }] };
+        state.threads.unshift(t);
+        state.version++;
       }
       return { id: t.id };
     }
@@ -75,7 +77,6 @@ export async function startMock({ threads = [], port = 0 } = {}) {
     t.messages.push({ text, outgoing });
     t.snippet = outgoing ? `You: ${text}` : text;
     t.timestamp = 'Now';
-    t.draft = false;
     state.threads.unshift(t);
     state.version++;
   }

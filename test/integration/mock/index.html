@@ -56,8 +56,7 @@
   function renderList() {
     const list = $('#list');
     list.innerHTML = '';
-    // A conversation started but not yet written to is not listed.
-    const visible = state.threads.filter((t) => !t.gone && !t.draft);
+    const visible = state.threads.filter((t) => !t.gone);
     for (const t of visible.slice(0, shown)) {
       const item = document.createElement('mws-conversation-list-item');
       item.dataset.id = t.id;
