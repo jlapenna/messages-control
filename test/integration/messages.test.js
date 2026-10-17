@@ -220,13 +220,17 @@ test('a conversation that holds no message yet is not a message', async () => {
   await sleep(1000);
   const rows = await (await api(`/api/messages?thread=${id}`)).json();
   assert.deepEqual(rows.map((r) => [r.direction, r.text]), [['in', 'Who is this?']]);
-  // In a conversation already known, the same words are a message.
+  // A known conversation previews its banner while an MMS downloads; the
+  // picture that replaces it is the message.
   mock.arrive(id, 'Texting with +1 555-010-0177 (SMS/MMS)');
-  const spoof = await until(async () => {
+  await sleep(1500);
+  mock.arrive(id, 'Photo');
+  const after = await until(async () => {
     const r = await (await api(`/api/messages?thread=${id}`)).json();
-    return r.length === 2 ? r : null;
-  }, 20000, 'the text that reads like a banner');
-  assert.equal(spoof[0].text, 'Texting with +1 555-010-0177 (SMS/MMS)');
+    return r.length >= 2 ? r : null;
+  }, 20000, 'the picture');
+  await sleep(1000);
+  assert.deepEqual((await (await api(`/api/messages?thread=${id}`)).json()).map((r) => r.text), ['Photo', 'Who is this?'], JSON.stringify(after));
 });
 
 test('a saved contact\'s number lands in their conversation, and the CLI sends through the running watcher', async () => {

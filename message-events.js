@@ -17,12 +17,12 @@
   let checking = null;
   let again = false;
 
-  // A conversation that holds no message yet previews only its banner, as
-  // the real page shows it (2026-10): one just opened with "Start chat", or
-  // an incoming MMS still downloading. Its first message replaces it. Only a
-  // thread new to the snapshot can be in that state; in a known one, a text
-  // that reads exactly like its banner is a message.
-  const isBanner = (t, known) => known[t.id] === undefined && t.snippet === `Texting with ${t.name} (SMS/MMS)`;
+  // The list previews a conversation's banner, not a message, while it has
+  // none to show (real page, 2026-10): one just opened with "Start chat", or
+  // an incoming MMS still downloading, perhaps in a known conversation too.
+  // The message that replaces it is recorded. A text reading exactly like
+  // the thread's own banner is skipped too: the list cannot tell them apart.
+  const isBanner = (t) => t.snippet === `Texting with ${t.name} (SMS/MMS)`;
 
   // "You: see you then" is a message the phone sent.
   const parse = (snippet) => {
@@ -53,7 +53,7 @@
           // The first look at an inbox is history. Afterwards a thread that is
           // new to the snapshot only counts when its message is from today:
           // older ones are history scrolled into view.
-          if (!snapshot || !top.has(t.id) || known[t.id] === t.snippet || (known[t.id] === undefined && !t.recent) || isBanner(t, known)) continue;
+          if (!snapshot || !top.has(t.id) || known[t.id] === t.snippet || (known[t.id] === undefined && !t.recent) || isBanner(t)) continue;
           fresh.push(t);
         }
         // Bounded like content.js's seen list; the oldest entries go first.
