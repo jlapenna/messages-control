@@ -205,8 +205,9 @@ watcher is down are recorded when it comes back.
   does not apply: the request is the authorization, so keep the token
   private. 400 for a bad request, 404 for an unknown thread, 409 otherwise
   (busy page, or the message did not show as sent; check the conversation
-  before retrying, since it may still have gone out). Starting a
-  conversation has only been tested against the mock page. Sends and
+  before retrying, since it may still have gone out). A new number's
+  conversation is listed as soon as it is opened, so a send that fails after
+  that leaves it empty in the list. Sends and
   conversation reads that arrive together take turns on the page, in order.
 
 Prometheus scrape config:

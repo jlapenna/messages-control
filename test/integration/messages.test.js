@@ -209,6 +209,19 @@ test('a text to a new number starts a conversation', async () => {
   assert.equal(list[0].id, 't-new-5550100163', 'listed at the top once written to');
 });
 
+test('a conversation that holds no message yet is not a message', async () => {
+  // Opened elsewhere: listed with only its banner until a text arrives.
+  const started = await fetch(`${mock.base}/__actions`, { method: 'POST', body: JSON.stringify({ action: 'start', to: '+1 555-010-0177' }) });
+  const { id } = await started.json();
+  await until(async () => ((await (await api('/api/threads?limit=3')).json()).some((t) => t.id === id) ? true : null), 20000, 'the new conversation listed');
+  await sleep(1500); // past the watcher's check of the list
+  mock.arrive(id, 'Who is this?');
+  await until(async () => ((await (await api(`/api/messages?thread=${id}`)).json()).length ? true : null), 20000, 'the first message');
+  await sleep(1000);
+  const rows = await (await api(`/api/messages?thread=${id}`)).json();
+  assert.deepEqual(rows.map((r) => [r.direction, r.text]), [['in', 'Who is this?']]);
+});
+
 test('a saved contact\'s number lands in their conversation, and the CLI sends through the running watcher', async () => {
   const run = (args) =>
     new Promise((resolve) => {

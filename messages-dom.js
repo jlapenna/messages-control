@@ -668,8 +668,9 @@
   }
 
   // The new-conversation picker: "Start chat" opens it, a number typed into
-  // its input offers a "Send to <number>" row. Not yet checked against the
-  // real page (2026-10); the mock copies this structure.
+  // its input offers a "Send to <number>" button. Real page (2026-10-16):
+  // for a number with no conversation, picking it opens one at once, and the
+  // list shows it with only its "Texting with …" banner until a text is sent.
   const START_CHAT = 'a[href*="/web/conversations/new"]';
   const CONTACT_INPUT = '[data-e2e-contact-input], input[placeholder*="phone number" i]';
 
