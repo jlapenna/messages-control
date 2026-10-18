@@ -95,7 +95,9 @@ verify the desktop proxy fixture when changing its downloader dependencies.
   events and answers the API's thread queries and sends.
 - `src/page-shim.js`: the slice of `chrome.*` those two use, backed by Node;
   `src/cli.js` injects shim + driver + content.js into the page.
-- `src/backend.js`: the LLM call and the log. `src/store.js`:
+- `src/classifier.js`: shared classifier requests and reply parsing for the
+  extension and standalone runner. `src/backend.js`: the standalone log,
+  classifier failure tracking and additional verdict fields. `src/store.js`:
   `chrome.storage.local` on a JSON file. `src/pair.js`: pairing.
   `src/browser.js`: the persistent Chromium profile. `src/config.js`: modes
   and the config file.
