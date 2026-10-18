@@ -1,23 +1,10 @@
+import { classificationText, OTP_RE, requestVerdict } from './classifier.js';
+
 // What background.js does for the extension: answer the page's messages
 // (settings, classify, log). Pictures the page couldn't read are fetched with
 // the browser's cookies and downscaled inside the page.
 const LOG_LIMIT = 300;
 const FAILURE_LIMIT = 5;
-// Backstop for the model: a code-ish word near a 4-8 digit number.
-const OTP_RE = /\b(code|passcode|otp|one[- ]time|verification|verify|2fa|login|sign[- ]in)\b[\s\S]{0,60}\b\d{4,8}\b|\b\d{4,8}\b[\s\S]{0,60}\b(code|passcode|otp|verification)\b/i;
-
-// One quick retry on network-level failures, which the gateway occasionally
-// produces; HTTP errors are returned as-is.
-async function fetchWithRetry(url, init) {
-  try {
-    return await fetch(url, init);
-  } catch (err) {
-    if (init.signal?.aborted) throw err;
-    await new Promise((r) => setTimeout(r, 2000));
-    return fetch(url, init);
-  }
-}
-
 // The page hands over picture URLs; only Google's own picture hosts (what the
 // extension's host_permissions allow) are fetched with the browser's cookies.
 function isPictureHost(src) {
@@ -145,42 +132,9 @@ export class Backend {
   async classify(thread) {
     const s = this.settings;
     if (!s.apiKey) throw new Error('No API key: set LITELLM_API_KEY or "apiKey" in the config file.');
-    const body = thread.texts?.length ? thread.texts.join('\n---\n') : thread.text;
-    const media = thread.media
-      ? thread.images?.length
-        ? `\n[${thread.images.length} picture(s) attached below]`
-        : '\n[picture message; the picture could not be retrieved]'
-      : '';
-    const text = `From: ${thread.name}\n${body}${media}`.slice(0, 4000);
+    const text = classificationText(thread);
     const images = (await Promise.all((thread.images ?? []).map((src) => this.toDataUrl(src)))).filter(Boolean);
-    const userContent = images.length
-      ? [{ type: 'text', text }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))]
-      : text;
-    const res = await fetchWithRetry(s.endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${s.apiKey}` },
-      body: JSON.stringify({
-        model: s.model,
-        temperature: 0,
-        // The default model reasons before answering; a tight cap can leave no
-        // room for the JSON on harder messages.
-        max_tokens: 2000,
-        response_format: { type: 'json_object' },
-        messages: [
-          { role: 'system', content: s.prompt },
-          { role: 'user', content: userContent },
-        ],
-      }),
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!res.ok) throw new Error(`LLM HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const data = await res.json();
-    const choice = data.choices?.[0];
-    const content = choice?.message?.content ?? '';
-    if (!content && choice?.finish_reason === 'length') throw new Error('LLM ran out of tokens before answering');
-    const json = content.match(/\{[\s\S]*\}/)?.[0];
-    if (!json) throw new Error(`Unparseable LLM reply: ${content.slice(0, 200)}`);
-    const verdict = JSON.parse(json);
+    const verdict = await requestVerdict(s, text, images);
     // Custom prompts from before spam_probability may still answer with
     // {spam, confidence}.
     const score = Math.min(1, Math.max(0, Number(
