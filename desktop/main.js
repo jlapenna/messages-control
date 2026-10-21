@@ -117,13 +117,6 @@ async function openDashboard() {
   });
   if (await waitForApi()) await win.loadURL(apiUrl());
   else await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(`<h2 style="font-family:sans-serif">The watcher is not running.</h2><pre>${esc(logTail.slice(-20).join('\n'))}</pre>`)}`);
-  // Smoke test: capture the window and quit.
-  if (process.env.MESSAGES_CONTROL_DESKTOP_SCREENSHOT) {
-    await new Promise((r) => setTimeout(r, 4000));
-    const image = await win.webContents.capturePage();
-    fs.writeFileSync(process.env.MESSAGES_CONTROL_DESKTOP_SCREENSHOT, image.toPNG());
-    app.quit();
-  }
 }
 
 function updateTray() {
