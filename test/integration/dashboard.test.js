@@ -75,14 +75,10 @@ test('view the original message before an explicit undo, without acting during r
     assert.equal(await page.locator('#message-preview b').count(), 0);
     assert.match(await page.locator('#message-outcome').innerText(), /blocked & reported.*manual action/);
     assert.equal(delivered.length, 0, 'viewing the snapshot does not touch the Google Messages page');
-    // Optional local evidence; normal CI does not retain screenshots.
-    if (process.env.MC_QA_SCREENSHOTS === '1') await page.screenshot({ path: '/tmp/messages-control-message-details-desktop.png' });
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.locator('#message-dialog').evaluate((e) => e.scrollWidth <= e.clientWidth));
-    if (process.env.MC_QA_SCREENSHOTS === '1') await page.screenshot({ path: '/tmp/messages-control-message-details-mobile.png' });
     await page.getByRole('button', { name: 'Close', exact: true }).click();
     assert.ok(await page.locator('#events').evaluate((e) => e.scrollWidth <= e.clientWidth));
-    if (process.env.MC_QA_SCREENSHOTS === '1') await page.screenshot({ path: '/tmp/messages-control-activity-clear-mobile.png', fullPage: true });
     await page.locator('[data-view="2"]').click();
     await page.getByRole('button', { name: 'Unarchive', exact: true }).waitFor();
     await page.getByRole('button', { name: 'Close', exact: true }).click();
