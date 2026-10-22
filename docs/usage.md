@@ -172,14 +172,17 @@ message is a changed preview: two identical texts in a row count once, and
 the first look at an inbox is the baseline, not events. Only a thread's latest
 preview is visible, so several texts that reach one thread within half a
 second, or while the watcher is down, are recorded as the last of them; read
-the conversation for the rest. Previews (up to 500
-characters) are kept `messageRetentionDays`. Messages that arrive while the
+the conversation for the rest. All text supplied by the conversation list
+is kept for `messageRetentionDays`, without a character cutoff. Previously
+stored text cut off at 500 characters cannot be recovered from the event log;
+use the conversation read below for full message bodies. Messages that arrive while the
 watcher is down are recorded when it comes back.
 
 - `GET /api/messages?after&since&thread&direction&q&limit` — recorded
   messages: `{id, time, threadId, name, direction: "in"|"out", text, unread,
   listTime, msgTime}`. Newest first; with `after=ID`, the ones after that id
-  oldest first, for following along. `q` matches the text or the name.
+  oldest first, for following along. `text` contains the entire recorded text,
+  including in the stream and replay. `q` matches the text or the name.
   `direction` comes from the preview's "You:" prefix, so an incoming text
   that itself starts with "You:" is recorded as outgoing; the conversation
   read below has the page's own marker.
@@ -192,7 +195,8 @@ watcher is down are recorded when it comes back.
 - `GET /api/threads/:id/messages?limit` — opens one conversation and returns
   `{id, name, channel: "rcs"|"sms"|null, messages: [{direction, sender, text,
   images, time, status, encrypted}]}`, oldest first, read from the page's
-  message labels. Opening marks the conversation read and sends an RCS read
+  message bubbles and labels, with no character cutoff. Only currently loaded
+  messages are returned. Opening marks the conversation read and sends an RCS read
   receipt if those are on. 404 if the thread is not in the loaded list, 409
   while a scan holds the page.
 - `POST /api/send {thread, text}` or `{to, text}` — sends one text (a single

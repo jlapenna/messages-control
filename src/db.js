@@ -103,7 +103,7 @@ export class Db {
       String(m.threadId),
       m.name ?? null,
       m.direction === 'out' ? 'out' : 'in',
-      m.text == null ? null : String(m.text).slice(0, 500),
+      m.text == null ? null : String(m.text),
       m.unread ? 1 : 0,
       m.listTime ?? null,
       m.msgTime ?? null,
