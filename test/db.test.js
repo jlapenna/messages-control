@@ -79,7 +79,7 @@ test('messages seen arriving are queryable by cursor, thread, direction and text
   assert.deepEqual(db.messages({ direction: 'out' }).map((m) => m.id), [2]);
   assert.deepEqual(db.messages({ q: '_010%' }).map((m) => m.id), [1], 'LIKE wildcards in the query are literal');
   assert.deepEqual(db.messages({ q: 'sam' }).map((m) => m.id), [2], 'the sender name matches too');
-  assert.equal(db.message(3).text.length, 500);
+  assert.equal(db.message(3).text, 'x'.repeat(600));
   assert.equal(db.pruneMessages(t - 1500), 2);
   assert.deepEqual(db.messages().map((m) => m.id), [3]);
   db.close();

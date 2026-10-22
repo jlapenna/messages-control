@@ -17,10 +17,11 @@ const db = new Db(path.join(dir, 'state.db'));
 const store = new Store(path.join(dir, 'state.json'));
 const messageEvents = new EventEmitter();
 const delivered = [];
+const longText = `${'Full message 📨\n'.repeat(100)}final searchable tail`;
 const page = {
   threads: { ok: true, threads: [{ id: 'a', name: 'Alex', snippet: 'hi', timestamp: '2:51 PM', msgTime: 1, unread: true }] },
   sendMessage: { ok: true, sent: { id: 'a', name: 'Alex', started: false, text: 'on my way' }, row: { label: 'sent' } },
-  readMessages: { ok: true, thread: { id: 'a', name: 'Alex', channel: 'rcs', messages: [{ direction: 'in', sender: 'Alex', text: 'hi', images: 0, time: 1, status: null, encrypted: true }] } },
+  readMessages: { ok: true, thread: { id: 'a', name: 'Alex', channel: 'rcs', messages: [{ direction: 'in', sender: 'Alex', text: longText, images: 0, time: 1, status: null, encrypted: true }] } },
 };
 const server = await startApi({
   settings: { ...DEFAULTS, apiKey: 'k' }, port: 0, token: 'secret-token', db, store,
@@ -140,6 +141,7 @@ test('threads and one conversation are read live from the page', async () => {
   const thread = await (await fetch(`${base}/api/threads/a/messages?limit=20`, { headers: auth })).json();
   assert.equal(thread.channel, 'rcs');
   assert.equal(thread.messages[0].encrypted, true);
+  assert.equal(thread.messages[0].text, longText);
   assert.deepEqual(delivered.at(-1), { type: 'readMessages', id: 'a', limit: 20 });
   page.readMessages = { ok: false, error: 'thread zz is not in the loaded conversation list' };
   assert.equal((await fetch(`${base}/api/threads/zz/messages`, { headers: auth })).status, 404);
@@ -170,4 +172,17 @@ test('a send is checked, then handed to the page', async () => {
 test('sendRequest accepts the usual ways of writing a number', () => {
   for (const to of ['+15550100142', '555-010-0142', '(555) 010-0142', '555.010.0142', '+44 20 7946 0958']) assert.equal(sendRequest({ to, text: 'x' }).to, to);
   assert.match(sendRequest({ to: '555-010-0142; rm', text: 'x' }).error, /phone number/);
+});
+
+test('GET, live feed and replay preserve message text beyond 500 characters', { timeout: 10000 }, async () => {
+  const res = await fetch(`${base}/api/messages/stream?thread=long-text`, { headers: auth });
+  const live = readEvents(res, 1);
+  arrive({ threadId: 'long-text', name: 'Long text', direction: 'in', text: longText });
+  const [event] = await live;
+  assert.equal(event.text, longText);
+  const rows = await (await fetch(`${base}/api/messages?thread=long-text&q=final%20searchable%20tail`, { headers: auth })).json();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].text, longText);
+  const replay = await fetch(`${base}/api/messages/stream?thread=long-text&after=${event.id - 1}`, { headers: auth });
+  assert.equal((await readEvents(replay, 1))[0].text, longText);
 });
