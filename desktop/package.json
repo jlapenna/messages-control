@@ -9,7 +9,7 @@
     "dist": "electron-builder --dir"
   },
   "devDependencies": {
-    "electron": "44.9.3",
+    "electron": "44.10.0",
     "electron-builder": "26.18.0"
   },
   "build": {
@@ -37,7 +37,7 @@
   "author": "Joe LaPenna",
   "overrides": {
     "@electron/get@^3.0.0": {
-      "global-agent": "4.1.3"
+      "global-agent": "4.1.6"
     }
   }
 }
