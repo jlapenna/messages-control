@@ -1,6 +1,6 @@
 # Self-contained image: Chromium comes with the Playwright base image.
 # docker build -t messages-control . && docker run -it -v messages-control:/data messages-control init
-FROM node:24.22.1-slim@sha256:be8204d4bd327363357f532187b752ff62759c31bedf98e9e18fc08c9cbd605c AS node-runtime
+FROM node:24.22.2-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS node-runtime
 FROM mcr.microsoft.com/playwright:v1.64.1-noble
 COPY --from=node-runtime /usr/local/bin/node /usr/bin/node
 RUN test "$(node -p 'process.versions.node')" = 24.22.1
