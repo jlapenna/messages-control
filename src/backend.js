@@ -56,8 +56,10 @@ export class Backend {
         case 'getSettings':
           return { ok: true, settings: this.settings };
         case 'classify': {
-          // unavailable: the endpoint is down, so the page doesn't count
-          // this against the thread's tries.
+          // unavailable: skipped during a pause, so the page doesn't count
+          // it against the thread's tries. A call that reached the endpoint
+          // always counts, so a thread that keeps failing can't hold every
+          // retry after a pause.
           if (Date.now() < this.pausedUntil) {
             return { ok: false, unavailable: true, error: `LLM endpoint failing; next try at ${new Date(this.pausedUntil).toISOString()}` };
           }
@@ -72,7 +74,7 @@ export class Backend {
             this.pauseMs = Math.min(this.pauseMs * 2 || PAUSE_MS, MAX_PAUSE_MS);
             this.pausedUntil = Date.now() + this.pauseMs;
             if (this.failures === FAILURE_LIMIT) this.onFailing(`LLM endpoint failing: ${err.message}`);
-            return { ok: false, unavailable: true, error: String(err?.message ?? err) };
+            throw err;
           } finally {
             this.stats.ms += Date.now() - t0;
           }

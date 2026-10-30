@@ -92,7 +92,7 @@ test('handle() counts consecutive failures, then pauses calls instead of stoppin
   }
   assert.deepEqual(failing, []);
   const fifth = await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
-  assert.equal(fifth.unavailable, true);
+  assert.ok(!fifth.unavailable);
   assert.equal(failing.length, 1);
   assert.match(failing[0], /LLM endpoint failing/);
   // Paused: fails fast without calling the endpoint or notifying again.
@@ -103,8 +103,10 @@ test('handle() counts consecutive failures, then pauses calls instead of stoppin
   assert.equal(calls, before);
   assert.ok(backend.pausedUntil - Date.now() > 55000);
   // After the pause one call goes through; another failure doubles it.
+  // It counts against its thread like any call that reached the endpoint.
   backend.pausedUntil = 0;
-  await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  const probe = await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  assert.ok(!probe.unavailable);
   assert.equal(calls, before + 1);
   assert.ok(backend.pausedUntil - Date.now() > 115000);
   assert.equal(failing.length, 1);
