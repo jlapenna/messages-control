@@ -44,6 +44,7 @@ export class Backend {
     this.failures = 0;
     this.pauseMs = 0;
     this.pausedUntil = 0;
+    this.probing = false;
     // For /metrics: classifier calls since the process started.
     this.stats = { calls: 0, failures: 0, ms: 0 };
     // Log writes are read-modify-write, so run them one at a time.
@@ -59,10 +60,14 @@ export class Backend {
           // unavailable: skipped during a pause, so the page doesn't count
           // it against the thread's tries. A call that reached the endpoint
           // always counts, so a thread that keeps failing can't hold every
-          // retry after a pause.
+          // retry after a pause. After a pause only one call (the probe)
+          // goes through; the others wait for its answer.
           if (Date.now() < this.pausedUntil) {
             return { ok: false, unavailable: true, error: `LLM endpoint failing; next try at ${new Date(this.pausedUntil).toISOString()}` };
           }
+          const probe = this.failures >= FAILURE_LIMIT;
+          if (probe && this.probing) return { ok: false, unavailable: true, error: 'LLM endpoint failing; retrying' };
+          if (probe) this.probing = true;
           let verdict;
           const t0 = Date.now();
           this.stats.calls++;
@@ -71,12 +76,16 @@ export class Backend {
           } catch (err) {
             this.stats.failures++;
             if (++this.failures < FAILURE_LIMIT) throw err;
-            this.pauseMs = Math.min(this.pauseMs * 2 || PAUSE_MS, MAX_PAUSE_MS);
-            this.pausedUntil = Date.now() + this.pauseMs;
+            // Calls already in flight when the pause began don't extend it.
+            if (Date.now() >= this.pausedUntil) {
+              this.pauseMs = Math.min(this.pauseMs * 2 || PAUSE_MS, MAX_PAUSE_MS);
+              this.pausedUntil = Date.now() + this.pauseMs;
+            }
             if (this.failures === FAILURE_LIMIT) this.onFailing(`LLM endpoint failing: ${err.message}`);
             throw err;
           } finally {
             this.stats.ms += Date.now() - t0;
+            if (probe) this.probing = false;
           }
           if (this.failures >= FAILURE_LIMIT) this.onRecovered();
           this.failures = 0;

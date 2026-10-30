@@ -112,6 +112,27 @@ test('handle() counts consecutive failures, then pauses calls instead of stoppin
   assert.equal(failing.length, 1);
 });
 
+test('after a pause one probe goes through and parallel failures double the pause once', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise((r) => (release = r));
+  globalThis.fetch = async () => (calls++, await gate, new Response('down', { status: 503 }));
+  const backend = new Backend({ settings });
+  const call = () => backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  // Eight calls in flight together trip the limit: the pause is set once.
+  const batch = Array.from({ length: 8 }, call);
+  release();
+  await Promise.all(batch);
+  assert.equal(backend.pauseMs, 60000);
+  // After the pause, four parallel callers: one probe, three skipped.
+  backend.pausedUntil = 0;
+  calls = 0;
+  const results = await Promise.all([call(), call(), call(), call()]);
+  assert.equal(calls, 1);
+  assert.equal(results.filter((r) => r.unavailable).length, 3);
+  assert.equal(backend.pauseMs, 120000);
+});
+
 test('a success resets the failure count and the pause', async () => {
   const failing = [];
   let recovered = 0;
