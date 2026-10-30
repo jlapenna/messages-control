@@ -245,8 +245,11 @@ pairing if no approval prompt appears. If the Google session has expired, stop
 the service, run `messages-control pair --headed`, then restart the service.
 Do not open the same browser profile from two processes at once.
 
-Exit code `2` means pairing needs attention; `3` means the classifier kept
-failing. The service restarts failures after 30 seconds, except exit code `2`.
+Exit code `2` means pairing needs attention. The service restarts failures
+after 30 seconds, except exit code `2`. When the classifier fails five times
+in a row the watcher keeps running: it sends `llm-failing` once, then tries
+the classifier again after a pause that doubles from 1 to 30 minutes
+(`llm.retryAt` in `/api/status`). Threads waiting meanwhile keep their tries.
 Use `messages-control uninstall-service` to remove the service and digest timer.
 
 ## Storage

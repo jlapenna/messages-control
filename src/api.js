@@ -295,7 +295,7 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       baselined,
       lastScan: lastScan ? { time: lastScan.time, summary: lastScan.summary } : null,
       last24h: db.counts(Date.now() - 86400000),
-      llm: backend.stats,
+      llm: { ...backend.stats, retryAt: backend.pausedUntil || null },
       startedAt: START,
     };
   }
