@@ -80,29 +80,79 @@ test('request carries the prompt, the sender and the model', async () => {
   assert.match(calls[0].body.messages[1].content, /^From: Alice\nsee you at 6/);
 });
 
-test('handle() counts consecutive failures and calls onFatal at the limit', async () => {
-  globalThis.fetch = async () => new Response('down', { status: 503 });
-  let fatal = null;
-  const backend = new Backend({ settings, onFatal: (m) => (fatal = m) });
+test('handle() counts consecutive failures, then pauses calls instead of stopping', async () => {
+  let calls = 0;
+  globalThis.fetch = async () => (calls++, new Response('down', { status: 503 }));
+  const failing = [];
+  const backend = new Backend({ settings, onFailing: (m) => failing.push(m) });
   for (let i = 0; i < 4; i++) {
     const res = await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
     assert.equal(res.ok, false);
+    assert.ok(!res.unavailable);
   }
-  assert.equal(fatal, null);
-  await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
-  assert.match(fatal, /LLM endpoint failing/);
+  assert.deepEqual(failing, []);
+  const fifth = await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  assert.ok(!fifth.unavailable);
+  assert.equal(failing.length, 1);
+  assert.match(failing[0], /LLM endpoint failing/);
+  // Paused: fails fast without calling the endpoint or notifying again.
+  const before = calls;
+  const paused = await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  assert.equal(paused.unavailable, true);
+  assert.match(paused.error, /next try at/);
+  assert.equal(calls, before);
+  assert.ok(backend.pausedUntil - Date.now() > 55000);
+  // After the pause one call goes through; another failure doubles it.
+  // It counts against its thread like any call that reached the endpoint.
+  backend.pausedUntil = 0;
+  const probe = await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  assert.ok(!probe.unavailable);
+  assert.equal(calls, before + 1);
+  assert.ok(backend.pausedUntil - Date.now() > 115000);
+  assert.equal(failing.length, 1);
 });
 
-test('a success resets the failure count', async () => {
-  let fatal = null;
-  const backend = new Backend({ settings, onFatal: (m) => (fatal = m) });
+test('after a pause one probe goes through and parallel failures double the pause once', async () => {
+  let calls = 0;
+  let release;
+  const gate = new Promise((r) => (release = r));
+  globalThis.fetch = async () => (calls++, await gate, new Response('down', { status: 503 }));
+  const backend = new Backend({ settings });
+  const call = () => backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  // Eight calls in flight together trip the limit: the pause is set once.
+  const batch = Array.from({ length: 8 }, call);
+  release();
+  await Promise.all(batch);
+  assert.equal(backend.pauseMs, 60000);
+  // After the pause, four parallel callers: one probe, three skipped.
+  backend.pausedUntil = 0;
+  calls = 0;
+  const results = await Promise.all([call(), call(), call(), call()]);
+  assert.equal(calls, 1);
+  assert.equal(results.filter((r) => r.unavailable).length, 3);
+  assert.equal(backend.pauseMs, 120000);
+});
+
+test('a success resets the failure count and the pause', async () => {
+  const failing = [];
+  let recovered = 0;
+  const backend = new Backend({ settings, onFailing: (m) => failing.push(m), onRecovered: () => recovered++ });
   globalThis.fetch = async () => new Response('down', { status: 503 });
   for (let i = 0; i < 4; i++) await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
   answerWith({ spam_probability: 0 });
   await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  assert.equal(recovered, 0);
   globalThis.fetch = async () => new Response('down', { status: 503 });
   await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
-  assert.equal(fatal, null);
+  assert.deepEqual(failing, []);
+  for (let i = 0; i < 4; i++) await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } });
+  assert.equal(failing.length, 1);
+  backend.pausedUntil = 0;
+  answerWith({ spam_probability: 0 });
+  assert.equal((await backend.handle({ type: 'classify', thread: { name: 'x', text: 'y' } })).ok, true);
+  assert.equal(recovered, 1);
+  assert.equal(backend.pausedUntil, 0);
+  assert.equal(backend.pauseMs, 0);
 });
 
 test('pictures are fetched only from Google picture hosts', async () => {

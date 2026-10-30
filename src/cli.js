@@ -30,7 +30,6 @@ const PAGE_SCRIPTS = ['src/page-shim.js', 'messages-dom.js', 'policy.js', 'conte
 // Exit codes a service manager can tell apart.
 const EXIT_ERROR = 1;
 const EXIT_UNPAIRED = 2; // needs a person: `pair --headed`
-const EXIT_LLM = 3; // the endpoint kept failing
 
 const USAGE = `usage: messages-control [command] [options]
 
@@ -91,7 +90,7 @@ While running, http://127.0.0.1:7373/ serves /healthz and /metrics
 (Prometheus) openly and the dashboard + /api/* behind api.token.
 "notify" in the config: { "telegram": { "token", "chatId" }, "command": "...",
 "events": [...] } — actions, pairing approvals, failures and digests go there.
-Exit codes: ${EXIT_UNPAIRED} = not paired (run pair --headed), ${EXIT_LLM} = LLM endpoint failing.
+Exit codes: ${EXIT_UNPAIRED} = not paired (run pair --headed).
 To unpair, delete the profile directory under the state dir.`;
 
 const COMMANDS = new Set([
@@ -529,7 +528,11 @@ async function main() {
         console.warn('message not recorded:', err.message);
       }
     },
-    onFatal: (message) => fatal('llm-failing', message, EXIT_LLM),
+    onFailing: (message) => {
+      console.error(message);
+      notify(settings, 'llm-failing', message);
+    },
+    onRecovered: () => console.log('LLM endpoint answering again'),
   });
   // Typing into the compose box: the page only sends on trusted input
   // events, so this happens here with a real keyboard and mouse.

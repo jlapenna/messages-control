@@ -33,7 +33,7 @@
 
   async function send(msg) {
     const res = await chrome.runtime.sendMessage(msg);
-    if (!res?.ok) throw new Error(res?.error ?? 'no response from background');
+    if (!res?.ok) throw Object.assign(new Error(res?.error ?? 'no response from background'), { unavailable: !!res?.unavailable });
     return res;
   }
 
@@ -305,6 +305,8 @@
           attempts.set(t.id, n);
           return { row: row(t, { label: 'pending', outcome: `waiting for the message to finish loading (${n}/${MAX_ATTEMPTS})` }), done: false };
         }
+        // The classifier is down, not this thread: keep its tries for later.
+        if (err.unavailable) return { row: row(t, { label: 'pending', outcome: 'waiting for the classifier', reason: err.message }), done: false };
         const n = (attempts.get(t.id) ?? 0) + 1;
         attempts.set(t.id, n);
         const done = n >= MAX_ATTEMPTS;
@@ -541,7 +543,7 @@
             try {
               await classify(t);
             } catch (err) {
-              attempts.set(t.id, (attempts.get(t.id) ?? 0) + 1);
+              if (!err.unavailable) attempts.set(t.id, (attempts.get(t.id) ?? 0) + 1);
               failed.push(t);
               await log(row(t, { label: 'error', outcome: 'classify failed; will retry in a later scan', reason: err.message }));
             }

@@ -5,6 +5,10 @@ import { classificationText, OTP_RE, requestVerdict } from './classifier.js';
 // the browser's cookies and downscaled inside the page.
 const LOG_LIMIT = 300;
 const FAILURE_LIMIT = 5;
+// Once the endpoint is failing, calls fail fast until a pause has passed;
+// then one call goes through. The pause doubles up to the cap.
+const PAUSE_MS = 60000;
+const MAX_PAUSE_MS = 1800000;
 // The page hands over picture URLs; only Google's own picture hosts (what the
 // extension's host_permissions allow) are fetched with the browser's cookies.
 function isPictureHost(src) {
@@ -25,7 +29,7 @@ function extractOf(raw) {
 }
 
 export class Backend {
-  constructor({ store, settings, context = null, page = null, onLog = () => {}, onMessage = () => {}, onFatal = () => {} }) {
+  constructor({ store, settings, context = null, page = null, onLog = () => {}, onMessage = () => {}, onFailing = () => {}, onRecovered = () => {} }) {
     this.store = store;
     this.settings = settings;
     this.context = context;
@@ -34,9 +38,13 @@ export class Backend {
     // A new message seen in the conversation list (standalone runner only).
     this.onMessage = onMessage;
     // Consecutive classify failures; a run of them means the endpoint is
-    // down, not one bad message.
-    this.onFatal = onFatal;
+    // down, not one bad message. The watcher keeps running through it.
+    this.onFailing = onFailing;
+    this.onRecovered = onRecovered;
     this.failures = 0;
+    this.pauseMs = 0;
+    this.pausedUntil = 0;
+    this.probing = false;
     // For /metrics: classifier calls since the process started.
     this.stats = { calls: 0, failures: 0, ms: 0 };
     // Log writes are read-modify-write, so run them one at a time.
@@ -49,6 +57,17 @@ export class Backend {
         case 'getSettings':
           return { ok: true, settings: this.settings };
         case 'classify': {
+          // unavailable: skipped during a pause, so the page doesn't count
+          // it against the thread's tries. A call that reached the endpoint
+          // always counts, so a thread that keeps failing can't hold every
+          // retry after a pause. After a pause only one call (the probe)
+          // goes through; the others wait for its answer.
+          if (Date.now() < this.pausedUntil) {
+            return { ok: false, unavailable: true, error: `LLM endpoint failing; next try at ${new Date(this.pausedUntil).toISOString()}` };
+          }
+          const probe = this.failures >= FAILURE_LIMIT;
+          if (probe && this.probing) return { ok: false, unavailable: true, error: 'LLM endpoint failing; retrying' };
+          if (probe) this.probing = true;
           let verdict;
           const t0 = Date.now();
           this.stats.calls++;
@@ -56,12 +75,22 @@ export class Backend {
             verdict = await this.classify(msg.thread);
           } catch (err) {
             this.stats.failures++;
-            if (++this.failures >= FAILURE_LIMIT) this.onFatal(`LLM endpoint failing: ${err.message}`);
+            if (++this.failures < FAILURE_LIMIT) throw err;
+            // Calls already in flight when the pause began don't extend it.
+            if (Date.now() >= this.pausedUntil) {
+              this.pauseMs = Math.min(this.pauseMs * 2 || PAUSE_MS, MAX_PAUSE_MS);
+              this.pausedUntil = Date.now() + this.pauseMs;
+            }
+            if (this.failures === FAILURE_LIMIT) this.onFailing(`LLM endpoint failing: ${err.message}`);
             throw err;
           } finally {
             this.stats.ms += Date.now() - t0;
+            if (probe) this.probing = false;
           }
+          if (this.failures >= FAILURE_LIMIT) this.onRecovered();
           this.failures = 0;
+          this.pauseMs = 0;
+          this.pausedUntil = 0;
           return { ok: true, verdict };
         }
         case 'log':
