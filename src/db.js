@@ -158,6 +158,13 @@ export class Db {
       .map((r) => ({ ...r, extract: r.extract ? JSON.parse(r.extract) : null }));
   }
 
+  // When a person last acted on each thread from the review queue (block,
+  // trash, archive or keep), so a verdict they already answered stops
+  // being held for them.
+  decided() {
+    return new Map(this.db.prepare("select thread_id, max(time) as time from events where rule = 'review' and label is not 'error' group by thread_id").all().map((r) => [r.thread_id, r.time]));
+  }
+
   events({ since = 0, limit = 50 } = {}) {
     return this.db.prepare('select * from events where time >= ? order by time desc, id desc limit ?').all(since, limit);
   }

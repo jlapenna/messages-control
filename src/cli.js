@@ -232,12 +232,15 @@ function policyCommand(settings, store, sub) {
 }
 
 // What the rules hold for a person: cached verdicts whose decision is
-// "hold", with the name the events table last saw for the thread.
+// "hold" and that nobody has acted on since, with the name the events table
+// last saw for the thread.
 function review(settings, store, db) {
   const policy = loadPolicy();
   const { verdicts = {} } = store.get('verdicts');
   const names = new Map(db.db.prepare('select thread_id, name from events where name is not null group by thread_id').all().map((r) => [r.thread_id, r.name]));
+  const decided = db.decided();
   const held = Object.entries(verdicts)
+    .filter(([id, v]) => !(decided.get(id) >= (v.time ?? 0)))
     .map(([id, v]) => [id, v, policy.decide(v, { isNew: true, settings: { ...settings, dryRun: false }, thread: { msgTime: v.msgTime, recent: false } })])
     .filter(([, , d]) => d.hold);
   if (!held.length) return console.log(`Nothing held for review (mode ${settings.mode}; the spam-review rule is on in full mode).`);
