@@ -276,7 +276,9 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
   function review() {
     const { verdicts = {} } = store.get('verdicts');
     const names = new Map(db.db.prepare('select thread_id, name from events where name is not null group by thread_id').all().map((r) => [r.thread_id, r.name]));
+    const decided = db.decided();
     return Object.entries(verdicts)
+      .filter(([id, v]) => !(decided.get(id) >= (v.time ?? 0)))
       .map(([id, v]) => ({ id, name: names.get(id) ?? null, ...v, decision: policy.decide(v, { isNew: true, settings: { ...settings, dryRun: false }, thread: { msgTime: v.msgTime, recent: false } }) }))
       .filter((x) => x.decision.hold)
       .sort((a, b) => (b.time ?? 0) - (a.time ?? 0))

@@ -147,7 +147,8 @@ other `Host` headers are refused; `/api/*` keeps its token.
   `messages_control_llm_failures_total`, `messages_control_llm_seconds_total`,
   `process_start_time_seconds`.
 - `/` — the dashboard: health, the last 24 hours, the review queue with
-  keep/archive/block/trash buttons, recent activity with "View message", the
+  keep/archive/block/trash buttons (a thread leaves the queue once acted on,
+  and returns only if a newer message is held), recent activity with "View message", the
   rules in force, a "Scan now" button. View message shows the sender, action,
   reason and saved preview before offering "Undo block" or "Unarchive".
   Previews contain up to 500 characters from the conversation list, not the

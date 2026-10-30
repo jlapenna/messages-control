@@ -101,6 +101,20 @@ test('status, events, review and policies', async () => {
   assert.ok(policies.rules.some((r) => r.name === 'spam-review'));
 });
 
+test('a thread acted on from the review queue leaves it until a newer verdict holds it again', async () => {
+  const held = async () => (await (await fetch(`${base}/api/review`, { headers: auth })).json()).map((r) => r.id);
+  const verdicts = store.get('verdicts').verdicts;
+  store.set({ verdicts: { ...verdicts, acted: { label: 'spam', score: 0.75, reason: 'pitch', time: Date.now() - 2000 } } });
+  assert.ok((await held()).includes('acted'));
+  db.recordEvent({ time: Date.now() - 1000, label: 'error', threadId: 'acted', outcome: 'block failed: gone', rule: 'review' });
+  assert.ok((await held()).includes('acted'), 'a failed action leaves the thread held');
+  db.recordEvent({ time: Date.now() - 1000, label: 'review', threadId: 'acted', outcome: 'blocked & reported', rule: 'review' });
+  assert.ok(!(await held()).includes('acted'));
+  store.set({ verdicts: { ...store.get('verdicts').verdicts, acted: { label: 'spam', score: 0.75, reason: 'again', time: Date.now() } } });
+  assert.ok((await held()).includes('acted'), 'a newer message is judged afresh');
+  store.set({ verdicts });
+});
+
 test('message details require authentication and show the action snapshot without page actions', async () => {
   db.recordEvent({ threadId: 'detail', name: 'Sample sender', text: '<b>Original message</b>', outcome: 'blocked & reported', rule: 'review' });
   const event = db.events({ limit: 1 })[0];
