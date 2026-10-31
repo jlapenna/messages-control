@@ -18,7 +18,14 @@
   // the list. After the full-list sweep the page holds the whole history;
   // labelling all of it would never settle once it outgrew VERDICT_LIMIT.
   const LABEL_SCOPE = 50;
+  // An unseen thread at the top of the list from today or yesterday is new
+  // mail: the page can miss a text until the watcher restarts after
+  // midnight. Older unseen threads are history.
+  const NEW_DAYS = 1;
+  const arrivedLately = (t) => t.ageDays != null && t.ageDays <= NEW_DAYS;
   const attempts = new Map();
+  // When a thread's classifier call last failed; see the new-thread loop.
+  const failedAt = new Map();
   // New threads judged "not done" yet; they stay new even if newer
   // arrivals push them below topN before the next look.
   const retrying = new Set();
@@ -309,8 +316,11 @@
         if (err.unavailable) return { row: row(t, { label: 'pending', outcome: 'waiting for the classifier', reason: err.message }), done: false };
         const n = (attempts.get(t.id) ?? 0) + 1;
         attempts.set(t.id, n);
-        const done = n >= MAX_ATTEMPTS;
-        const outcome = done ? `gave up after ${n} tries` : `will retry (${n}/${MAX_ATTEMPTS})`;
+        failedAt.set(t.id, Date.now());
+        // A new thread is not given up on while it is recent: a long
+        // classifier outage would otherwise leave its spam in the inbox.
+        const done = n >= MAX_ATTEMPTS && !(isNew && arrivedLately(t));
+        const outcome = done ? `gave up after ${n} tries` : n < MAX_ATTEMPTS ? `will retry (${n}/${MAX_ATTEMPTS})` : 'will retry while the thread is new';
         return { row: row(t, { label: 'error', outcome, reason: err.message }), done };
       }
     }
@@ -440,16 +450,16 @@
         // mail, including threads the list hasn't rendered yet: load it all
         // first. Installs baselined before this did it once from the visible
         // part only, so they sweep once too (after nothing new is pending).
-        // Unseen threads from today at the top may be genuinely new: leave
-        // those for the new-thread check below.
+        // Unseen threads at the top that arrived lately may be genuinely new:
+        // leave those for the new-thread check below.
         const maybeNew = new Set(
-          baselined ? threads.slice(0, settings.topN).filter((t) => !seen[t.id] && t.recent).map((t) => t.id) : [],
+          baselined ? threads.slice(0, settings.topN).filter((t) => !seen[t.id] && arrivedLately(t)).map((t) => t.id) : [],
         );
         const { threads: all, complete } = await loadAllThreads();
-        // The sweep can take a while; anything unseen from today now at the
+        // The sweep can take a while; anything unseen and recent now at the
         // top may have arrived during it.
         // (On a first run everything listed is history, so nothing is held back.)
-        if (baselined) for (const t of all.slice(0, settings.topN)) if (!seen[t.id] && t.recent) maybeNew.add(t.id);
+        if (baselined) for (const t of all.slice(0, settings.topN)) if (!seen[t.id] && arrivedLately(t)) maybeNew.add(t.id);
         await markSeen(all.map((t) => t.id).filter((id) => !maybeNew.has(id) && !retrying.has(id)));
         if (complete) await chrome.storage.local.set({ fullSweep: SWEEP_VERSION });
         await log({
@@ -470,8 +480,8 @@
         threads = all;
       }
 
-      // New threads arrive at the top. Unseen threads dated before today
-      // lazy-loaded after the baseline; they are history, not new mail.
+      // New threads arrive at the top. Older unseen threads lazy-loaded after
+      // the baseline; they are history, not new mail.
       const top = threads.slice(0, settings.topN);
       // Waiting threads and their look counts outlive a page reload or a
       // one-off `scan`, so the third look still comes.
@@ -482,7 +492,7 @@
         attempts.set(id, Math.max(attempts.get(id) ?? 0, n));
       }
       const waiting = threads.filter((t) => retrying.has(t.id) && !seen[t.id] && !top.includes(t));
-      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : [...top.filter((t) => !seen[t.id] && t.recent), ...waiting];
+      const fresh = !settings.enabled && !includeSeen ? [] : includeSeen ? top : [...top.filter((t) => !seen[t.id] && arrivedLately(t)), ...waiting];
       const stale = includeSeen ? [] : threads.filter((t) => !seen[t.id] && !fresh.includes(t));
       if (stale.length) await markSeen(stale.map((t) => t.id));
 
@@ -491,9 +501,14 @@
       const publish = (summary) =>
         saveScan(summary, [...new Set([...shown(), ...threads.filter((t) => rows.has(t.id))])].map((t) => rows.get(t.id) ?? knownRow(t, { settings, verdicts })));
 
-      for (const t of fresh) rows.set(t.id, row(t, { label: 'pending', outcome: 'checking…' }));
+      // Threads out of tries go last, the one that failed longest ago first,
+      // so a thread that always fails can't take every call the classifier
+      // gets after a pause from the threads waiting behind it.
+      const outOfTries = (t) => (attempts.get(t.id) ?? 0) >= MAX_ATTEMPTS;
+      const queue = [...fresh.filter((t) => !outOfTries(t)), ...fresh.filter(outOfTries).sort((a, b) => (failedAt.get(a.id) ?? 0) - (failedAt.get(b.id) ?? 0))];
+      for (const t of queue) rows.set(t.id, row(t, { label: 'pending', outcome: 'checking…' }));
       await publish('Checking new threads…');
-      for (const t of fresh) {
+      for (const t of queue) {
         const res = await processThread(t, { isNew: true, settings, verdicts });
         rows.set(t.id, res.row);
         await log(res.row);

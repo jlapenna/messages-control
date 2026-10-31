@@ -81,6 +81,9 @@ conversation shows no message text and no picture (for example, only the
 "Texting with…" banner while an MMS downloads), or a picture message's
 picture is not retrieved yet, the thread stays new and is looked at again on
 the next scan. After three looks it is judged with whatever has loaded.
+An unseen thread at the top of the list from today or yesterday counts as
+new, so a text the watcher first sees after midnight is still acted on;
+older unseen threads are history.
 
 Automatic classification skips names without digits or `@` by default. This
 is a name heuristic, not a lookup in your contacts. Change `skipNamedContacts`

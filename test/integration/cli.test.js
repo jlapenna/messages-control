@@ -138,6 +138,19 @@ test('a harmless follow-up does not hide the pitch before it', async () => {
   assert.match(asked?.text ?? '', /Claim now/, 'the earlier preview reached the classifier');
 });
 
+test('spam the page missed until after midnight is still judged as new; older unseen threads are not', async () => {
+  // A watcher restarted after midnight sees yesterday's unseen text for the
+  // first time: it is new mail. An unseen thread from weeks ago is history.
+  mock.reset([
+    { id: 't-late', name: '(555) 010-0888', snippet: 'Vote YES on Prop 9 and donate today!', timestamp: 'Yesterday', messages: [{ text: 'Vote YES on Prop 9 and donate today!' }] },
+    ...threads,
+    { id: 't-old', name: '(555) 010-0889', snippet: 'Vote YES on Prop 8 and donate!', timestamp: '9/25/24', messages: [{ text: 'Vote YES on Prop 8 and donate!' }] },
+  ]);
+  await cli('scan', '--live');
+  assert.deepEqual(byId(mock.actions(), 't-late'), ['block_report']);
+  assert.deepEqual(byId(mock.actions(), 't-old'), []);
+});
+
 test('your own message is checked once, not again after the page reloads', async () => {
   // Each CLI run is a fresh page, as after the runner's 20-minute reload.
   const own = () => events().filter((e) => e.thread_id === 't-own-invite').length;
