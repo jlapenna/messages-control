@@ -57,8 +57,5 @@ jobs:
       app-client-id: ${{ vars.AGENT_LCARS_CLIENT_ID }}
       # Glue work must never queue behind a long agent session.
       runs-on: '["ubuntu-latest"]'
-      # The required checks in this repository's Protect main ruleset
-      # (infra/github-ruleset/main.tf).
-      required-checks: '["gitleaks","validate / repository validation","repository-owned Terraform","test"]'
     secrets:
       APP_PRIVATE_KEY: ${{ secrets.AGENT_LCARS_PRIVATE_KEY }}
