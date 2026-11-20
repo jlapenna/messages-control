@@ -12,13 +12,11 @@ export const EVENTS = ['action', 'pairing-approval', 'unpaired', 'llm-failing', 
 //     "telegram": { "token": "...", "chatId": "..." },
 //     "command": "telegram-send \"$MC_MESSAGE\""                             (MC_EVENT, MC_MESSAGE, MC_PHOTO)
 //   }
-// "notifyCommand" at the top level still works and means notify.command.
 export function channels(settings) {
   const n = settings.notify ?? {};
   const out = [];
   if (n.telegram?.token && n.telegram?.chatId) out.push({ kind: 'telegram', ...n.telegram });
-  const command = n.command ?? settings.notifyCommand;
-  if (command) out.push({ kind: 'command', command });
+  if (n.command) out.push({ kind: 'command', command: n.command });
   return out;
 }
 

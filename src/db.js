@@ -53,6 +53,10 @@ export class Db {
         text text,
         extract text
       );
+      create table if not exists meta (
+        key text primary key,
+        value text
+      );
     `);
     // Upgrade databases created before events.text and verdicts.extract existed.
     if (!this.db.prepare('pragma table_info(events)').all().some((c) => c.name === 'text')) {
@@ -75,6 +79,17 @@ export class Db {
         version = excluded.version, time = excluded.time, msg_time = excluded.msg_time, media = excluded.media, text = excluded.text,
         extract = excluded.extract
     `);
+    this.upsertMeta = this.db.prepare('insert into meta (key, value) values (?, ?) on conflict(key) do update set value = excluded.value');
+    this.selectMeta = this.db.prepare('select value from meta where key = ?');
+  }
+
+  getMeta(key) {
+    const row = this.selectMeta.get(String(key));
+    return row ? JSON.parse(row.value) : null;
+  }
+
+  setMeta(key, value) {
+    this.upsertMeta.run(String(key), JSON.stringify(value));
   }
 
   // One log entry (the row content.js logs), as it happened.

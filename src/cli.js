@@ -438,14 +438,21 @@ async function main() {
       const delivered = sent.filter(Boolean).length;
       if (!sent.length) {
         console.log('no notify channel configured');
-      } else if (delivered === sent.length) {
-        console.log(`sent via ${delivered} channel(s)`);
       } else {
-        console.error(`digest delivery failed (${delivered}/${sent.length} channel(s) succeeded)`);
-        db.close();
-        process.exit(EXIT_ERROR);
+        const now = Date.now();
+        const ok = delivered === sent.length;
+        db.setMeta('lastDigest', { time: now, ok, delivered, total: sent.length });
+        if (ok) db.setMeta('lastDigestSuccess', now);
+        if (ok) {
+          console.log(`sent via ${delivered} channel(s)`);
+        } else {
+          console.error(`digest delivery failed (${delivered}/${sent.length} channel(s) succeeded)`);
+          db.close();
+          process.exit(EXIT_ERROR);
+        }
       }
     }
+    db.close();
     return;
   }
   if (command === 'policy') return policyCommand(settings, store, positionals[1] ?? 'show');
