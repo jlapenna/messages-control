@@ -63,7 +63,7 @@ resource "github_repository_ruleset" "protect_main" {
       do_not_enforce_on_create             = false
 
       required_check {
-        context        = "LCARS review"
+        context        = "LCARS review (merge candidate)"
         integration_id = 4457090 # Agent LCARS
       }
       required_check {

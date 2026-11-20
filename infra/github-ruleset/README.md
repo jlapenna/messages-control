@@ -18,8 +18,8 @@ Applied 2026-10-11 from jlapenna/homelab `bin/plan-fleet-github-ruleset.sh messa
 ## Activating LCARS review
 
 1. Merge the review publisher and run it from the default branch.
-2. While the ruleset PR is open, verify a passing `LCARS review` check on
-   its latest commit and confirm its app ID matches the proposed rule.
+2. While the ruleset PR is open, verify a passing `LCARS review (merge candidate)` check on
+   its current GitHub test merge commit and confirm its app ID matches the proposed rule.
 3. Merge the ruleset PR, inspect the Homelab plan for that merged revision,
    and apply it. Verify the effective rules on `main` and a clean follow-up plan.
 
