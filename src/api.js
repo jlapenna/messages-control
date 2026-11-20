@@ -40,7 +40,7 @@ export function sendRequest(body) {
   return { thread, to, text };
 }
 
-export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = [], db, store, backend, health, deliver, messageEvents = null, policy, log = console.log }) {
+export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = [], db, store, backend, health, deliver, messageEvents = null, policy, digestScheduled = () => false, log = console.log }) {
   const server = http.createServer((req, res) => {
     handle(req, res).catch((err) => {
       send(res, 500, { error: err.message });
@@ -300,6 +300,7 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
     const { lastScan } = store.get('lastScan');
     const lastDigest = db.getMeta('lastDigest');
     const lastDigestSuccess = db.getMeta('lastDigestSuccess');
+    const scheduled = Boolean(digestScheduled());
     const lines = [
       '# HELP messages_control_up 1 while the watcher process runs.',
       '# TYPE messages_control_up gauge',
@@ -316,6 +317,9 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       '# HELP messages_control_last_scan_timestamp_seconds When the page last finished a scan.',
       '# TYPE messages_control_last_scan_timestamp_seconds gauge',
       `messages_control_last_scan_timestamp_seconds ${lastScan ? Math.floor(lastScan.time / 1000) : 0}`,
+      '# HELP messages_control_digest_scheduled 1 when the daily digest systemd timer is enabled on this host.',
+      '# TYPE messages_control_digest_scheduled gauge',
+      `messages_control_digest_scheduled ${scheduled ? 1 : 0}`,
       '# HELP messages_control_digest_last_run_timestamp_seconds When digest --send last attempted delivery (0 if never).',
       '# TYPE messages_control_digest_last_run_timestamp_seconds gauge',
       `messages_control_digest_last_run_timestamp_seconds ${lastDigest?.time ? Math.floor(lastDigest.time / 1000) : 0}`,

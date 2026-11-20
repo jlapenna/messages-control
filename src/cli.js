@@ -244,6 +244,10 @@ function serviceUnitPath() {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'systemd', 'user', 'messages-control.service');
 }
 
+function isDigestTimerEnabled() {
+  return fs.existsSync(path.join(path.dirname(serviceUnitPath()), 'timers.target.wants', 'messages-control-digest.timer'));
+}
+
 function installService() {
   const args = ['run'];
   if (flags.live) args.push('--live');
@@ -716,7 +720,7 @@ async function main() {
       return { ok: alive && paired, alive, paired, pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) };
     };
     try {
-      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, messageEvents, policy: loadPolicy() });
+      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, messageEvents, policy: loadPolicy(), digestScheduled: isDigestTimerEnabled });
     } catch (err) {
       console.warn(`API not started (${err.message}); healthz and the dashboard are off.`);
     }
