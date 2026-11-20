@@ -9,7 +9,7 @@ import { parseArgs } from 'node:util';
 import { CONFIG_FILE, STATE_DIR, loadSettings, readConfig, writeConfig } from './config.js';
 import { Store } from './store.js';
 import { Db } from './db.js';
-import { eventDetails } from './event-details.js';
+import { heldForReview, undoTarget } from './event-details.js';
 import { notify as sendNotification } from './notify.js';
 import { digestText, parseSince } from './digest.js';
 import { sendRequest, startApi } from './api.js';
@@ -231,21 +231,11 @@ function policyCommand(settings, store, sub) {
   for (const [k, n] of [...tally].sort((a, b) => b[1] - a[1])) console.log(`  ${String(n).padStart(4)}  ${k}`);
 }
 
-// What the rules hold for a person: cached verdicts whose decision is
-// "hold" and that nobody has acted on since, with the name the events table
-// last saw for the thread.
 function review(settings, store, db) {
-  const policy = loadPolicy();
-  const { verdicts = {} } = store.get('verdicts');
-  const names = new Map(db.db.prepare('select thread_id, name from events where name is not null group by thread_id').all().map((r) => [r.thread_id, r.name]));
-  const decided = db.decided();
-  const held = Object.entries(verdicts)
-    .filter(([id, v]) => !(decided.get(id) >= (v.time ?? 0)))
-    .map(([id, v]) => [id, v, policy.decide(v, { isNew: true, settings: { ...settings, dryRun: false }, thread: { msgTime: v.msgTime, recent: false } })])
-    .filter(([, , d]) => d.hold);
+  const held = heldForReview(db, store, loadPolicy(), settings);
   if (!held.length) return console.log(`Nothing held for review (mode ${settings.mode}; the spam-review rule is on in full mode).`);
-  for (const [id, v, d] of held.sort((a, b) => (b[1].time ?? 0) - (a[1].time ?? 0))) {
-    console.log(`${id}  ${(names.get(id) ?? '?').padEnd(18)} ${v.label} ${Math.round((v.score ?? 0) * 100)}%  ${d.rule}: ${(v.reason ?? '').slice(0, 80)}`);
+  for (const r of held) {
+    console.log(`${r.id}  ${(r.name ?? '?').padEnd(18)} ${r.label} ${Math.round((r.score ?? 0) * 100)}%  ${r.decision.rule}: ${(r.reason ?? '').slice(0, 80)}`);
   }
   console.log(`\n${held.length} held. Decide one: messages-control act <id> block|trash|archive|keep [--live]`);
 }
@@ -671,12 +661,11 @@ async function main() {
   await inject();
   let undoMsg = null;
   if (command === 'undo') {
-    const event = db.db.prepare('select * from events where id = ?').get(Number(String(positionals[1]).replace('#', '')));
-    if (!event) throw new Error(`no event #${positionals[1]} (see \`log\`)`);
-    const kind = /^blocked/.test(event.outcome ?? '') ? 'blocked' : /^archived/.test(event.outcome ?? '') ? 'archived' : null;
-    if (!kind) throw new Error(`event #${event.id} was "${event.outcome}": only blocks and archives can be undone (Messages for web has no trash view)`);
-    if (!event.name) throw new Error(`event #${event.id} has no sender name to look up`);
-    undoMsg = { type: 'undo', kind, name: event.name, threadId: event.thread_id, text: eventDetails(db, store, event).text };
+    const target = undoTarget(db, store, String(positionals[1]).replace('#', ''));
+    if (target.error === 'not_found') throw new Error(`no event #${positionals[1]} (see \`log\`)`);
+    if (target.error === 'not_undoable') throw new Error(`event #${target.event.id} was "${target.event.outcome}": only blocks and archives can be undone (Messages for web has no trash view)`);
+    if (target.error === 'no_name') throw new Error(`event #${target.event.id} has no sender name to look up`);
+    undoMsg = target.msg;
   }
   const oneOff = {
     diagnose: { type: 'diagnose' },
@@ -765,10 +754,6 @@ async function main() {
     if (busy) return;
     await page.reload({ waitUntil: 'domcontentloaded' }).catch((err) => console.warn('reload failed:', err.message));
   }, reloadEvery);
-  // Test hook: pretend the phone unpaired us after N seconds, to exercise the
-  // recovery path (mend → ensurePaired → exit 2) without touching the pairing.
-  const fakeUnpair = Number(process.env.MESSAGES_CONTROL_TEST_UNPAIR_AFTER);
-  if (fakeUnpair > 0) setTimeout(() => fatal('unpaired', 'Not paired with the phone (test hook). Run: messages-control pair --headed', EXIT_UNPAIRED), fakeUnpair * 1000);
   page.on('crash', () => fatal('crash', 'The browser page crashed.', EXIT_ERROR));
   context.on('close', () => fatal('browser-closed', 'The browser closed.', EXIT_ERROR));
   setInterval(mend, 30000);

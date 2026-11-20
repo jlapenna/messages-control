@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual } from 'node:crypto';
-import { eventDetails } from './event-details.js';
+import { eventDetails, heldForReview, undoTarget } from './event-details.js';
 
 // The watcher's local HTTP API, on 127.0.0.1 only.
 //   GET  /healthz         200 when paired and the page answers, else 503 (no token)
@@ -158,12 +158,10 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
           return send(res, r?.ok ? 200 : 409, r ?? { ok: false, error: 'no answer from the page' });
         }
         case '/api/undo': {
-          const event = db.db.prepare('select * from events where id = ?').get(Number(body.event));
-          if (!event) return send(res, 404, { error: `no event ${body.event}` });
-          const kind = /^blocked/.test(event.outcome ?? '') ? 'blocked' : /^archived/.test(event.outcome ?? '') ? 'archived' : null;
-          if (!kind || !event.name) return send(res, 400, { error: `event ${event.id} ("${event.outcome}") cannot be undone` });
-          const { text } = eventDetails(db, store, event);
-          const r = await deliver({ type: 'undo', kind, name: event.name, threadId: event.thread_id, text });
+          const target = undoTarget(db, store, body.event);
+          if (target.error === 'not_found') return send(res, 404, { error: `no event ${body.event}` });
+          if (!target.ok) return send(res, 400, { error: `event ${target.event.id} ("${target.event.outcome}") cannot be undone` });
+          const r = await deliver(target.msg);
           return send(res, r?.ok ? 200 : 409, r ?? { ok: false, error: 'no answer from the page' });
         }
         case '/api/send': {
@@ -273,17 +271,7 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
     });
   }
 
-  function review() {
-    const { verdicts = {} } = store.get('verdicts');
-    const names = new Map(db.db.prepare('select thread_id, name from events where name is not null group by thread_id').all().map((r) => [r.thread_id, r.name]));
-    const decided = db.decided();
-    return Object.entries(verdicts)
-      .filter(([id, v]) => !(decided.get(id) >= (v.time ?? 0)))
-      .map(([id, v]) => ({ id, name: names.get(id) ?? null, ...v, decision: policy.decide(v, { isNew: true, settings: { ...settings, dryRun: false }, thread: { msgTime: v.msgTime, recent: false } }) }))
-      .filter((x) => x.decision.hold)
-      .sort((a, b) => (b.time ?? 0) - (a.time ?? 0))
-      .map(({ text, ...rest }) => rest); // message text stays local
-  }
+  const review = () => heldForReview(db, store, policy, settings);
 
   async function status() {
     const { lastScan, baselined = false } = store.get(['lastScan', 'baselined']);

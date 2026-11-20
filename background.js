@@ -1,4 +1,4 @@
-import { classificationText, OTP_RE, requestVerdict } from './src/classifier.js';
+import { classificationText, parseVerdict, requestVerdict } from './src/classifier.js';
 import { getSettings } from './settings.js';
 import { endpointPermission } from './endpoint-permission.js';
 
@@ -34,27 +34,7 @@ async function classify(thread) {
   const text = classificationText(thread);
   const images = (await Promise.all((thread.images ?? []).map(toDataUrl))).filter(Boolean);
   const verdict = await requestVerdict(s, text, images);
-  // Custom prompts from before spam_probability may still answer with
-  // {spam, confidence}.
-  const score = Math.min(1, Math.max(0, Number(
-    verdict.spam_probability ??
-      (verdict.spam === true ? verdict.confidence ?? 1 : 1 - (verdict.confidence ?? 1)),
-  ) || 0));
-  const rawSpam = score >= 0.5;
-  return {
-    // Spam wins: sender-written text can always look like a code ("verify
-    // your account, code 123456: http://..."), so OTP never overrides it.
-    otp: !rawSpam && (verdict.otp === true || OTP_RE.test(text)),
-    // The regex is only a labelling backstop; cleanup acts on the model's own
-    // flag, since a person's "gate code is 4821" can match the regex.
-    otpByModel: !rawSpam && verdict.otp === true,
-    notification: !rawSpam && verdict.notification === true,
-    spam: rawSpam && score >= s.threshold,
-    rawSpam,
-    score,
-    reason: String(verdict.reason ?? ''),
-    pictures: images.filter(Boolean).length,
-  };
+  return parseVerdict(verdict, { text, threshold: s.threshold, pictures: images.length });
 }
 
 // Log writes are read-modify-write, so run them one at a time; otherwise a
