@@ -1,4 +1,3 @@
-// fleet-onboard: managed by jlapenna/agent-lcars tools/fleet-onboard.mjs. Re-run it to refresh; delete this line to own the file locally.
 //
 // Repository-owned inputs for this repository's Protect main ruleset.
 //
@@ -63,6 +62,10 @@ resource "github_repository_ruleset" "protect_main" {
       strict_required_status_checks_policy = false
       do_not_enforce_on_create             = false
 
+      required_check {
+        context        = "LCARS review (merge candidate)"
+        integration_id = 4457090 # Agent LCARS
+      }
       required_check {
         context = "gitleaks"
       }

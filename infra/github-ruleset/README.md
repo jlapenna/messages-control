@@ -14,3 +14,13 @@ access.
 ## Live ruleset
 
 Applied 2026-10-11 from jlapenna/homelab `bin/plan-fleet-github-ruleset.sh messages-control` (isolated state prefix `terraform/fleet-github-rulesets/jlapenna-messages-control`): ruleset id **24875597**, "Protect main", active; the follow-up plan was a zero diff.
+
+## Activating LCARS review
+
+1. Merge the review publisher and run it from the default branch.
+2. While the ruleset PR is open, verify a passing `LCARS review (merge candidate)` check on
+   its current GitHub test merge commit and confirm its app ID matches the proposed rule.
+3. Merge the ruleset PR, inspect the Homelab plan for that merged revision,
+   and apply it. Verify the effective rules on `main` and a clean follow-up plan.
+
+For rollback, revert and apply the requirement before removing the publisher.
