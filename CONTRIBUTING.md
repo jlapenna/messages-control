@@ -20,14 +20,16 @@ vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 The installed LCARS app reviews pull requests. A maintainer can comment
 `/review` to request a review of the current commit, including a Renovate
-update. The Agent LCARS App publishes the `LCARS review` check after the
+update. The Agent LCARS App publishes the `LCARS review (merge candidate)` check after the
 first passing verdict. A later blocking verdict changes that check to failure.
 A formal change request for the current comparison requires a qualifying
 LCARS approval or dismissal of the request before the check can pass. After a
 retarget, a change request without the new comparison receipt is provisional.
 A passing review with the current receipt clears that provisional request.
-GitHub associates the check with a commit. The publisher reconciles reviews
-across open PRs at that commit targeting the default branch.
+The check is published on GitHub’s test merge commit after verifying both
+parents against the current base and head. A missing or stale test merge
+commit waits for reconciliation. The publisher never writes the candidate
+check on the PR head.
 
 Before evaluating the diff, read the PR head, base branch and latest
 `BASE_REF_CHANGED_EVENT` ID from GitHub GraphQL

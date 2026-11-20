@@ -4,11 +4,13 @@ name: Publish LCARS review status
 # Never check out PR code or consume artifacts from the triggering run.
 # Configure the required check to use the Agent LCARS App after verification.
 # GitHub binds the result to a commit SHA.
-# Another PR sharing that SHA or a new review is reflected on reconciliation.
+# Publish only on the GitHub-generated test merge commit for this comparison.
 on:
   workflow_run:
     workflows: ['LCARS review event']
     types: [completed]
+  push:
+    branches: [main]
   workflow_dispatch:
   # Reconcile even when the PR changes its review-event workflow or a fork run awaits approval.
   schedule:
@@ -17,6 +19,7 @@ on:
 permissions:
   pull-requests: read
   checks: read
+  contents: read
 
 concurrency:
   group: publish-lcars-review-status
@@ -52,14 +55,22 @@ jobs:
             reviews=$(gh api --paginate --slurp "repos/$REPO/pulls/$pr/reviews?per_page=100")
             # GraphQL variables must reach GitHub literally.
             # shellcheck disable=SC2016
-            base_event=$(gh api graphql -F owner="${REPO%/*}" -F repo="${REPO#*/}" -F pr="$pr" \
+            comparison=$(gh api graphql -F owner="${REPO%/*}" -F repo="${REPO#*/}" -F pr="$pr" \
               -f query='query($owner:String!, $repo:String!, $pr:Int!) {
                 repository(owner:$owner, name:$repo) { pullRequest(number:$pr) {
+                  state baseRefName headRefOid baseRef { target { oid } }
+                  potentialMergeCommit { oid parents(first:2) { nodes { oid } } }
                   timelineItems(last:1, itemTypes:[BASE_REF_CHANGED_EVENT]) {
                     nodes { ... on BaseRefChangedEvent { id createdAt } }
                   }
                 } }
-              }' --jq '.data.repository.pullRequest.timelineItems.nodes[0] // {}')
+              }' --jq '.data.repository.pullRequest')
+            candidate=$(jq -r --arg base "$BASE" --arg head "$head" '
+              select(.state == "OPEN" and .baseRefName == $base and .headRefOid == $head)
+              | select([.potentialMergeCommit.parents.nodes[]?.oid] == [.baseRef.target.oid, $head])
+              | .potentialMergeCommit.oid // empty' <<< "$comparison")
+            [[ -n "$candidate" ]] || continue
+            base_event=$(jq -c '.timelineItems.nodes[0] // {}' <<< "$comparison")
             state=$(jq -r --argjson base_event "$base_event" --arg head "$head" '
               def marked($marker): (.body // "" | split("\n") | any(rtrimstr("\r") == $marker));
               def base_receipt: (.body // "" | split("\n")[0] | rtrimstr("\r") |
@@ -85,23 +96,23 @@ jobs:
               pending) description="Awaiting LCARS code review; ask a maintainer to comment /review" ;;
               success) description="LCARS reviewed this commit" ;;
             esac
-            # A commit status is shared across PRs with the same SHA.
+            # Group matching GitHub-generated merge candidates.
             # Every such PR needs its own review before the SHA can pass.
-            if [[ ${states[$head]:-} != pending ]]; then
-              states[$head]=$state
-              descriptions[$head]=$description
-              prs[$head]=$pr
+            if [[ ${states[$candidate]:-} != pending ]]; then
+              states[$candidate]=$state
+              descriptions[$candidate]=$description
+              prs[$candidate]=$pr
             fi
           done <<< "$pulls"
-          for head in "${!states[@]}"; do
-            state=${states[$head]}
-            description=${descriptions[$head]}
-            pr=${prs[$head]}
+          for candidate in "${!states[@]}"; do
+            state=${states[$candidate]}
+            description=${descriptions[$candidate]}
+            pr=${prs[$candidate]}
             # Update the existing check so a blocking rereview revokes success.
-            checks=$(gh api --paginate --slurp "repos/$REPO/commits/$head/check-runs?check_name=LCARS%20review&filter=all&per_page=100")
-            current=$(jq -c '[.[].check_runs[] | select(.app.id == 4457090 and .external_id == "lcars-review")] | max_by(.id)' <<< "$checks")
+            checks=$(gh api --paginate --slurp "repos/$REPO/commits/$candidate/check-runs?check_name=LCARS%20review%20%28merge%20candidate%29&filter=all&per_page=100")
+            current=$(jq -c '[.[].check_runs[] | select(.app.id == 4457090 and .external_id == "lcars-review-merge-candidate")] | max_by(.id)' <<< "$checks")
             details_url="https://github.com/$REPO/pull/$pr"
-            fields=(-f name="LCARS review" -f details_url="$details_url"
+            fields=(-f name="LCARS review (merge candidate)" -f details_url="$details_url"
               -f "output[title]=$description" -f "output[summary]=$description")
             check_status=completed
             conclusion=failure
@@ -113,7 +124,7 @@ jobs:
               # Missing required checks block merge. During staging, an optional
               # failed check would also hold unrelated Renovate updates.
               [[ "$state" == success ]] || continue
-              GH_TOKEN="$PUBLISHER_TOKEN" gh api --method POST "repos/$REPO/check-runs" -f head_sha="$head" -f external_id=lcars-review \
+              GH_TOKEN="$PUBLISHER_TOKEN" gh api --method POST "repos/$REPO/check-runs" -f head_sha="$candidate" -f external_id=lcars-review-merge-candidate \
                 -f status="$check_status" "${fields[@]}" --silent
             elif ! jq -e --arg status "$check_status" --arg title "$description" --arg url "$details_url" --arg conclusion "$conclusion" \
               '.status == $status and .details_url == $url and .output.title == $title and .conclusion == $conclusion' <<< "$current" >/dev/null; then
