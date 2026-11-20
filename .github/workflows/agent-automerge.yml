@@ -23,7 +23,7 @@ on:
   # last one succeeds. The reusable admits only successful same-repository
   # pull_request runs.
   workflow_run:
-    workflows: [CI, validate, gitleaks, ruleset]
+    workflows: [LCARS review event, CI, validate, gitleaks, ruleset]
     types: [completed]
   # Daily backstop, not a poll: a review thread resolved after checks went
   # green, a late arm, mergeability still UNKNOWN when an event's sweep ran,
