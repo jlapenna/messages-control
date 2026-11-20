@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Db } from '../src/db.js';
-import { digestText, isDigestTimerScheduled, parseSince } from '../src/digest.js';
+import { digestText, inspectDigestSchedule, parseSince, recordDigestSchedule } from '../src/digest.js';
 
 test('parseSince reads h, d and m', () => {
   assert.equal(parseSince('24h'), 86400000);
@@ -72,47 +72,118 @@ test('digest --send awaits notify.command and fails non-zero when delivery fails
   assert.equal(failSuccess, okSuccess);
 });
 
-test('isDigestTimerScheduled matches only when the enabled timer targets the watcher state dir', () => {
+test('inspectDigestSchedule resolves effective systemd state dir across env, drop-ins and flags', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-timer-'));
+  const homeDir = path.join(root, 'home');
   const unitDir = path.join(root, 'systemd', 'user');
   const wantsDir = path.join(unitDir, 'timers.target.wants');
-  const defaultDir = path.join(root, 'default-state');
+  const dropInDir = path.join(unitDir, 'messages-control-digest.service.d');
+  const defaultDir = path.join(homeDir, '.local', 'state', 'messages-control');
   const stateA = path.join(root, 'state-a');
   const stateB = path.join(root, 'state-b');
-  fs.mkdirSync(wantsDir, { recursive: true });
-  fs.mkdirSync(defaultDir, { recursive: true });
-  fs.mkdirSync(stateA, { recursive: true });
-  fs.mkdirSync(stateB, { recursive: true });
+  const stateShared = path.join(root, 'state-shared');
+  const stateDropIn = path.join(root, 'state-dropin');
+  for (const d of [wantsDir, dropInDir, defaultDir, stateA, stateB, stateShared, stateDropIn]) {
+    fs.mkdirSync(d, { recursive: true });
+  }
 
   const timerFile = path.join(unitDir, 'messages-control-digest.timer');
   const serviceFile = path.join(unitDir, 'messages-control-digest.service');
   const wantLink = path.join(wantsDir, 'messages-control-digest.timer');
+  const noSystemd = async () => null;
 
   // Not enabled yet.
-  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), false);
+  assert.deepEqual(
+    await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: noSystemd }),
+    { scheduled: false, sinceMs: null },
+  );
 
   fs.writeFileSync(timerFile, '[Timer]\nOnCalendar=*-*-* 08:00:00\n');
   fs.symlinkSync(timerFile, wantLink);
   // Missing service unit.
-  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), false);
+  assert.deepEqual(
+    await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: noSystemd }),
+    { scheduled: false, sinceMs: null },
+  );
 
-  // Default state dir matches default watcher, not a custom --state-dir watcher.
+  // Watcher's own XDG_STATE_HOME override must NOT leak into the digest unit's default path.
   fs.writeFileSync(serviceFile, '[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n');
-  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), true);
-  assert.equal(isDigestTimerScheduled(stateB, { unitDir, defaultStateDir: defaultDir }), false);
+  const watcherCustomXdg = path.join(root, 'watcher-xdg', 'messages-control');
+  fs.mkdirSync(watcherCustomXdg, { recursive: true });
+  assert.equal((await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(watcherCustomXdg, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, false);
 
-  // Explicit --state-dir A matches only A, never B or default.
+  // When both units inherit MESSAGES_CONTROL_STATE from the systemd user manager, both match stateShared.
+  const managerQuery = async () => ({
+    active: true,
+    unitFiles: [serviceFile],
+    workingDirectory: homeDir,
+    managerEnv: { HOME: homeDir, MESSAGES_CONTROL_STATE: stateShared },
+    sinceMs: 1700000000000,
+  });
+  assert.deepEqual(
+    await inspectDigestSchedule(stateShared, { unitDir, homeDir, querySystemd: managerQuery }),
+    { scheduled: true, sinceMs: 1700000000000 },
+  );
+  assert.deepEqual(
+    await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: managerQuery }),
+    { scheduled: false, sinceMs: null },
+  );
+
+  // Explicit --state-dir A overrides manager env and matches only A.
   fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send --state-dir ${stateA}\n`);
-  assert.equal(isDigestTimerScheduled(stateA, { unitDir, defaultStateDir: defaultDir }), true);
-  assert.equal(isDigestTimerScheduled(stateB, { unitDir, defaultStateDir: defaultDir }), false);
-  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), false);
+  assert.equal((await inspectDigestSchedule(stateA, { unitDir, homeDir, querySystemd: managerQuery })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: managerQuery })).scheduled, false);
+
+  // Drop-in Environment=MESSAGES_CONTROL_STATE overrides base default without --state-dir.
+  fs.writeFileSync(serviceFile, '[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n');
+  const dropIn = path.join(dropInDir, '10-state.conf');
+  fs.writeFileSync(dropIn, `[Service]\nEnvironment=MESSAGES_CONTROL_STATE=${stateDropIn}\n`);
+  const dropInQuery = async () => ({
+    active: true,
+    unitFiles: [serviceFile, dropIn],
+    workingDirectory: homeDir,
+    managerEnv: { HOME: homeDir },
+    sinceMs: 1700001000000,
+  });
+  assert.equal((await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, false);
+  // Filesystem fallback also reads messages-control-digest.service.d/*.conf drop-ins.
+  assert.equal((await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, false);
+
+  // Drop-in EnvironmentFile= is respected before Environment= overrides.
+  const envFile = path.join(root, 'digest.env');
+  fs.writeFileSync(envFile, `MESSAGES_CONTROL_STATE=${stateB}\n`);
+  fs.writeFileSync(dropIn, `[Service]\nEnvironmentFile=-${envFile}\n`);
+  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, false);
+
+  // Inactive timer returns scheduled=false even if unit files match.
+  const inactiveQuery = async () => ({ active: false });
+  assert.deepEqual(
+    await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: inactiveQuery }),
+    { scheduled: false, sinceMs: null },
+  );
 
   // Without --send, the unit does not deliver or record digest success.
   fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --state-dir ${stateA}\n`);
-  assert.equal(isDigestTimerScheduled(stateA, { unitDir, defaultStateDir: defaultDir }), false);
+  assert.equal((await inspectDigestSchedule(stateA, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, false);
+});
 
-  // Environment=MESSAGES_CONTROL_STATE in the unit is respected when --state-dir is omitted.
-  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nEnvironment=MESSAGES_CONTROL_STATE=${stateA}\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n`);
-  assert.equal(isDigestTimerScheduled(stateA, { unitDir, defaultStateDir: defaultDir }), true);
-  assert.equal(isDigestTimerScheduled(stateB, { unitDir, defaultStateDir: defaultDir }), false);
+test('recordDigestSchedule persists schedule start across restarts and clears when unscheduled', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-sched-db-'));
+  const dbPath = path.join(dir, 'state.db');
+  const db1 = new Db(dbPath);
+  assert.deepEqual(recordDigestSchedule(db1, { scheduled: false, sinceMs: null }, 1700000000000), { scheduled: false, sinceMs: 0 });
+  assert.deepEqual(recordDigestSchedule(db1, { scheduled: true, sinceMs: 1700000500000 }, 1700001000000), { scheduled: true, sinceMs: 1700000500000 });
+  db1.close();
+
+  // Reopen DB (simulating watcher restart): original sinceMs stays durable even if systemd reports a newer boot timestamp.
+  const db2 = new Db(dbPath);
+  assert.deepEqual(recordDigestSchedule(db2, { scheduled: true, sinceMs: 1700050000000 }, 1700060000000), { scheduled: true, sinceMs: 1700000500000 });
+  // Disabling clears the stored timestamp; re-enabling starts a fresh deadline.
+  assert.deepEqual(recordDigestSchedule(db2, { scheduled: false, sinceMs: null }, 1700070000000), { scheduled: false, sinceMs: 0 });
+  assert.deepEqual(recordDigestSchedule(db2, { scheduled: true, sinceMs: null }, 1700080000000), { scheduled: true, sinceMs: 1700080000000 });
+  db2.close();
 });

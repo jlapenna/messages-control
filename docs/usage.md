@@ -142,6 +142,12 @@ other `Host` headers are refused; `/api/*` keeps its token.
 - `/metrics` — Prometheus text, no token: `messages_control_healthy`,
   `messages_control_paired`, `messages_control_dry_run`,
   `messages_control_last_scan_timestamp_seconds`,
+  `messages_control_digest_scheduled` (`1` only when the daily digest systemd
+  timer is active and targets this watcher's state directory),
+  `messages_control_digest_scheduled_since_timestamp_seconds`,
+  `messages_control_digest_last_run_timestamp_seconds`,
+  `messages_control_digest_last_success_timestamp_seconds`,
+  `messages_control_digest_last_ok`,
   `messages_control_events_total{outcome=…}`,
   `messages_control_verdicts{label=…}`, `messages_control_llm_calls_total`,
   `messages_control_llm_failures_total`, `messages_control_llm_seconds_total`,

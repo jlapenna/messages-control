@@ -57,16 +57,19 @@ test('metrics is Prometheus text and needs no token', async () => {
   assert.match(text, /^messages_control_llm_seconds_total 1\.500$/m);
   assert.match(text, /^messages_control_dry_run 1$/m);
   assert.match(text, /^messages_control_last_scan_timestamp_seconds 1700000000$/m);
+  assert.match(text, /^# HELP messages_control_digest_scheduled .*watcher state directory/m);
   assert.match(text, /^messages_control_digest_scheduled 0$/m);
+  assert.match(text, /^messages_control_digest_scheduled_since_timestamp_seconds 0$/m);
   assert.match(text, /^messages_control_digest_last_run_timestamp_seconds 0$/m);
   assert.match(text, /^messages_control_digest_last_success_timestamp_seconds 0$/m);
   assert.doesNotMatch(text, /^messages_control_digest_last_ok/m);
 
-  digestScheduled = true;
+  digestScheduled = { scheduled: true, sinceMs: 1700001000000 };
   db.setMeta('lastDigest', { time: 1700003600000, ok: true, delivered: 1, total: 1 });
   db.setMeta('lastDigestSuccess', 1700003600000);
   const okText = await (await fetch(`${base}/metrics`)).text();
   assert.match(okText, /^messages_control_digest_scheduled 1$/m);
+  assert.match(okText, /^messages_control_digest_scheduled_since_timestamp_seconds 1700001000$/m);
   assert.match(okText, /^messages_control_digest_last_run_timestamp_seconds 1700003600$/m);
   assert.match(okText, /^messages_control_digest_last_success_timestamp_seconds 1700003600$/m);
   assert.match(okText, /^messages_control_digest_last_ok 1$/m);
