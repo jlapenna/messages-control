@@ -766,6 +766,11 @@
     try {
       t = await threadById(msg.id);
     } catch (err) {
+      if (msg.action === 'keep' && /not in the conversation list/.test(err.message)) {
+        const r = { threadId: msg.id, name: null, timestamp: '', text: '', label: 'ok', outcome: 'kept (no longer in inbox)', rule: 'review' };
+        await log(r);
+        return { ok: true, row: r };
+      }
       return { ok: false, error: err.message };
     }
     if (msg.action === 'keep') {

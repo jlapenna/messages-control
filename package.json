@@ -23,7 +23,7 @@
     "url": "https://github.com/jlapenna/messages-control/issues"
   },
   "homepage": "https://github.com/jlapenna/messages-control#readme",
-  "private": "true",
+  "private": true,
   "bin": {
     "messages-control": "./bin/messages-control.js"
   },
@@ -39,6 +39,7 @@
     "content.js",
     "messages-dom.js",
     "message-events.js",
+    "policy.js",
     "settings.js",
     "README.md",
     "LICENSE"

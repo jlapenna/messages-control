@@ -20,29 +20,9 @@ async function messagesTab() {
 
 const el = (tag, className, text) => Object.assign(document.createElement(tag), { className, textContent: text ?? '' });
 
-// Log entries written before rows had label/outcome.
-const LEGACY = {
-  'would-delete': ['spam', 'not deleted: dry run'],
-  spam: ['spam', 'not deleted: dry run'],
-  deleted: ['spam', 'deleted'],
-  kept: ['ok', 'kept'],
-  otp: ['otp', 'kept: one-time code'],
-  skipped: ['contact', 'not checked: saved contact'],
-  baseline: ['info', null],
-  error: ['error', null],
-};
-
-function normalize(e) {
-  if (e.label) return e;
-  const [label, outcome] = LEGACY[e.action] ?? ['info', e.action];
-  const score = e.score ?? (e.confidence != null ? (e.spam ? e.confidence : 1 - e.confidence) : undefined);
-  return { ...e, label, score, outcome: outcome ?? e.reason, reason: outcome ? e.reason : undefined };
-}
-
 // One line per thread: verdict and score, what happened, then who/when,
 // the model's reason, and the message preview.
-function renderRow(raw, { loggedAt } = {}) {
-  const e = normalize(raw);
+function renderRow(e, { loggedAt } = {}) {
   const li = document.createElement('li');
   const head = el('div', 'head');
   head.append(el('span', `tag ${e.label}`, e.label));

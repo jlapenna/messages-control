@@ -55,6 +55,22 @@ test('metrics is Prometheus text and needs no token', async () => {
   assert.match(text, /^messages_control_llm_seconds_total 1\.500$/m);
   assert.match(text, /^messages_control_dry_run 1$/m);
   assert.match(text, /^messages_control_last_scan_timestamp_seconds 1700000000$/m);
+  assert.match(text, /^messages_control_digest_last_run_timestamp_seconds 0$/m);
+  assert.match(text, /^messages_control_digest_last_success_timestamp_seconds 0$/m);
+  assert.doesNotMatch(text, /^messages_control_digest_last_ok/m);
+
+  db.setMeta('lastDigest', { time: 1700003600000, ok: true, delivered: 1, total: 1 });
+  db.setMeta('lastDigestSuccess', 1700003600000);
+  const okText = await (await fetch(`${base}/metrics`)).text();
+  assert.match(okText, /^messages_control_digest_last_run_timestamp_seconds 1700003600$/m);
+  assert.match(okText, /^messages_control_digest_last_success_timestamp_seconds 1700003600$/m);
+  assert.match(okText, /^messages_control_digest_last_ok 1$/m);
+
+  db.setMeta('lastDigest', { time: 1700090000000, ok: false, delivered: 0, total: 1 });
+  const failText = await (await fetch(`${base}/metrics`)).text();
+  assert.match(failText, /^messages_control_digest_last_run_timestamp_seconds 1700090000$/m);
+  assert.match(failText, /^messages_control_digest_last_success_timestamp_seconds 1700003600$/m);
+  assert.match(failText, /^messages_control_digest_last_ok 0$/m);
 });
 
 // fetch() drops a custom Host header, so these go through http.request.

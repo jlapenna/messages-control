@@ -50,10 +50,24 @@ test('digest --send awaits notify.command and fails non-zero when delivery fails
   const out = execFileSync(process.execPath, [bin, 'digest', '--send'], { env, encoding: 'utf8' });
   assert.match(out, /sent via 1 channel\(s\)/);
   assert.match(fs.readFileSync(receipt, 'utf8'), /^digest:Messages Control, last 24 h:/);
+  const dbAfterOk = new Db(path.join(dir, 'state', 'state.db'));
+  const okMeta = dbAfterOk.getMeta('lastDigest');
+  const okSuccess = dbAfterOk.getMeta('lastDigestSuccess');
+  dbAfterOk.close();
+  assert.equal(okMeta.ok, true);
+  assert.equal(okMeta.delivered, 1);
+  assert.equal(okSuccess, okMeta.time);
 
   fs.writeFileSync(cfg, JSON.stringify({ notify: { events: ['digest'], command: 'exit 3' } }));
   assert.throws(
     () => execFileSync(process.execPath, [bin, 'digest', '--send'], { env, encoding: 'utf8', stdio: 'pipe' }),
     (err) => err.status === 1 && /digest delivery failed \(0\/1 channel\(s\) succeeded\)/.test(err.stderr),
   );
+  const dbAfterFail = new Db(path.join(dir, 'state', 'state.db'));
+  const failMeta = dbAfterFail.getMeta('lastDigest');
+  const failSuccess = dbAfterFail.getMeta('lastDigestSuccess');
+  dbAfterFail.close();
+  assert.equal(failMeta.ok, false);
+  assert.equal(failMeta.delivered, 0);
+  assert.equal(failSuccess, okSuccess);
 });

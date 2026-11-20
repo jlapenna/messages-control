@@ -7,10 +7,10 @@ import { channels, notify, wanted } from '../src/notify.js';
 
 const telegram = { notify: { telegram: { token: 't0k', chatId: '42' } } };
 
-test('channels come from notify.telegram, notify.command and the old notifyCommand', () => {
+test('channels come from notify.telegram and notify.command', () => {
   assert.deepEqual(channels({}), []);
   assert.deepEqual(channels(telegram).map((c) => c.kind), ['telegram']);
-  assert.deepEqual(channels({ notifyCommand: 'x' }).map((c) => c.kind), ['command']);
+  assert.deepEqual(channels({ notify: { command: 'x' } }).map((c) => c.kind), ['command']);
   assert.deepEqual(channels({ ...telegram, notify: { ...telegram.notify, command: 'y' } }).map((c) => c.kind), ['telegram', 'command']);
 });
 
