@@ -14,3 +14,10 @@ access.
 ## Live ruleset
 
 Applied 2026-10-11 from jlapenna/homelab `bin/plan-fleet-github-ruleset.sh messages-control` (isolated state prefix `terraform/fleet-github-rulesets/jlapenna-messages-control`): ruleset id **24875597**, "Protect main", active; the follow-up plan was a zero diff.
+
+The `LCARS review` check on `main` must come from GitHub Actions (App 15368).
+A maintainer can comment `/review` if the current commit has no passing
+review. This applies to updates from Renovate as well. For rollback, revert
+the requirement and apply the reviewed ruleset plan before removing the
+publisher. Repository administrators retain the existing emergency bypass
+for a rollback PR blocked by a publisher outage.
