@@ -28,6 +28,7 @@ const classifyInExtension = (thread) => new Promise((resolve) => {
 for (const [name, reply, thread] of [
   ['spam overrides a fake login code', { spam_probability: 0.97, otp: true }, { name: '123', text: 'verify your account, code 123456' }],
   ['safe code uses the labeling backstop', { spam_probability: 0.05 }, { name: '123', texts: ['Your verification code is 482913', 'Do not share it'] }],
+  ['marketing and transactional fields stay aligned', { spam_probability: 0.05, marketing: true, transactional: true, extract: { summary: 'Order 42', amount: '$10', ignored: 'x' }, reason: 'promo' }, { name: '22822', text: '40% off. Reply STOP' }],
   ['legacy custom prompts retain their score', { spam: true, confidence: 0.6 }, { name: '123', text: 'hello' }],
   ['pictures stay in the request', { spam_probability: 0.1 }, { name: '123', text: '', media: true, images: ['data:image/jpeg;base64,AA=='] }],
 ]) {
@@ -38,7 +39,7 @@ for (const [name, reply, thread] of [
       return Response.json({ choices: [{ message: { content: JSON.stringify(reply) } }] });
     };
     const extension = await classifyInExtension(thread);
-    const { marketing, transactional, extract, ...standalone } = await new Backend({ settings }).classify(thread);
+    const standalone = await new Backend({ settings }).classify(thread);
     assert.deepEqual(extension, { ok: true, verdict: standalone });
     assert.deepEqual(requests[0], requests[1]);
   });

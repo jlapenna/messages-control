@@ -2,7 +2,7 @@
 // and spam among them is deleted; every other listed thread is classified
 // for display only (badge and side panel), never deleted.
 (() => {
-  const { listThreads, loadAllThreads, readThread, readMessages, isMediaSnippet, rowShape, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
+  const { listThreads, loadAllThreads, readThread, readMessages, isMediaSnippet, deleteThread, archiveThread, blockThread, unblockThread, unarchiveThread, sendText, markThread, diagnose, waitFor } = globalThis.MessagesDom;
   const SEEN_LIMIT = 5000;
   // Above the size of a long history, so "Process all messages" doesn't evict
   // the verdicts it just made for the newest threads.
@@ -184,18 +184,6 @@
   // which is not a message element. Nothing is sent to the classifier.
   class NotLoaded extends Error {}
 
-  // Layouts of list rows whose conversation opened empty, kept to learn
-  // whether the row itself marks a loading MMS (rowShape strips the words).
-  async function saveRowShape(thread) {
-    try {
-      const { loadingRowShapes = [] } = await chrome.storage.local.get('loadingRowShapes');
-      if (loadingRowShapes.length >= 5) return;
-      await chrome.storage.local.set({ loadingRowShapes: [...loadingRowShapes, { time: Date.now(), shape: rowShape(thread.element) }] });
-    } catch (err) {
-      console.warn('[messages-control] could not save row shape', err);
-    }
-  }
-
   async function classify(thread, { allowEmpty = false, earlier = [] } = {}) {
     const payload = { name: thread.name, text: thread.text, media: isMediaSnippet(thread.text) };
     // The list shows only the latest message; a harmless follow-up must not
@@ -211,7 +199,6 @@
         console.warn('[messages-control] could not read thread', thread.id, err);
       }
       if (read && !read.texts.length && !read.images.length && !allowEmpty) {
-        await saveRowShape(thread);
         throw new NotLoaded('nothing in the conversation yet');
       }
     }

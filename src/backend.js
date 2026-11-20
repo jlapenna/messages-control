@@ -1,4 +1,4 @@
-import { classificationText, OTP_RE, requestVerdict } from './classifier.js';
+import { classificationText, parseVerdict, requestVerdict } from './classifier.js';
 
 // What background.js does for the extension: answer the page's messages
 // (settings, classify, log). Pictures the page couldn't read are fetched with
@@ -18,14 +18,6 @@ function isPictureHost(src) {
   } catch {
     return false;
   }
-}
-
-const EXTRACT_KEYS = ['summary', 'date', 'amount', 'code'];
-function extractOf(raw) {
-  if (!raw || typeof raw !== 'object') return null;
-  const out = {};
-  for (const k of EXTRACT_KEYS) if (raw[k] != null && String(raw[k]).trim()) out[k] = String(raw[k]).trim().slice(0, 120);
-  return Object.keys(out).length ? out : null;
 }
 
 export class Backend {
@@ -160,34 +152,10 @@ export class Backend {
 
   async classify(thread) {
     const s = this.settings;
-    if (!s.apiKey) throw new Error('No API key: set LITELLM_API_KEY or "apiKey" in the config file.');
+    if (!s.apiKey) throw new Error('No API key: set MESSAGES_CONTROL_API_KEY or "apiKey" in the config file.');
     const text = classificationText(thread);
     const images = (await Promise.all((thread.images ?? []).map((src) => this.toDataUrl(src)))).filter(Boolean);
     const verdict = await requestVerdict(s, text, images);
-    // Custom prompts from before spam_probability may still answer with
-    // {spam, confidence}.
-    const score = Math.min(1, Math.max(0, Number(
-      verdict.spam_probability ??
-        (verdict.spam === true ? verdict.confidence ?? 1 : 1 - (verdict.confidence ?? 1)),
-    ) || 0));
-    const rawSpam = score >= 0.5;
-    return {
-      // Spam wins: sender-written text can always look like a code ("verify
-      // your account, code 123456: http://..."), so OTP never overrides it.
-      otp: !rawSpam && (verdict.otp === true || OTP_RE.test(text)),
-      // The regex is only a labelling backstop; cleanup acts on the model's own
-      // flag, since a person's "gate code is 4821" can match the regex.
-      otpByModel: !rawSpam && verdict.otp === true,
-      marketing: !rawSpam && verdict.marketing === true,
-      notification: !rawSpam && verdict.notification === true,
-      transactional: !rawSpam && verdict.transactional === true,
-      // What the message is about, for the digest: only known keys, short.
-      extract: extractOf(verdict.extract),
-      spam: rawSpam && score >= s.threshold,
-      rawSpam,
-      score,
-      reason: String(verdict.reason ?? ''),
-      pictures: images.length,
-    };
+    return parseVerdict(verdict, { text, threshold: s.threshold, pictures: images.length });
   }
 }

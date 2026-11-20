@@ -16,7 +16,7 @@ Deleted conversations cannot be restored.
 
 ## Get started
 
-You need an Android phone using Google Messages, Node.js 24, a desktop window
+You need an Android phone using Google Messages, Node.js 26, a desktop window
 for initial pairing, and an OpenAI-compatible chat-completions endpoint.
 Choose a vision-capable model if you want it to classify pictures. The
 standalone CLI is tested on Linux.

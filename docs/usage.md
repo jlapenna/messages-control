@@ -49,7 +49,7 @@ The default locations also respect `XDG_CONFIG_HOME` and `XDG_STATE_HOME`.
 | `skipNamedContacts` | `true` | skip automatic classification when the displayed name has no digits or `@`; not an address-book lookup |
 | `openPictureThreads` | `true` | open picture threads so the model sees them (marks them read) |
 | `unsubscribeMarketing` | `false` | reply `unsubscribeText` (`STOP`) to a marketing sender before trashing its thread |
-| `notifyCommand` | | shell command run on every action and failure, with `MC_EVENT` and `MC_MESSAGE` set |
+| `notify` | | notification channels (`telegram`, `command`) and event filter; see [Notifications and the daily digest](#notifications-and-the-daily-digest) |
 | `messageRetentionDays` | `30` | standalone: days new-message previews are kept for `/api/messages`; `0` records none |
 | `prompt` | see `settings.js` | the classifier instructions |
 

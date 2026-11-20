@@ -69,13 +69,10 @@ test('a scan over a fresh inbox acts on each thread as the rules say', async () 
   assert.ok(!asked.some((q) => /YOU TOOOO/.test(q.text)));
   assert.equal(asked.find((q) => /Measure G/.test(q.text))?.pictures, 1);
   // An MMS still downloading opens to a banner and no message: it waits,
-  // unjudged and still new, and its row's layout is saved without its words.
+  // unjudged and still new.
   assert.deepEqual(byId(acts, 't-mms-loading'), []);
   assert.ok(!asked.some((q) => /010-0399/.test(q.text ?? '')));
   assert.equal(outcome('t-mms-loading'), 'waiting for the message to finish loading (1/3)');
-  const shapes = JSON.parse(fs.readFileSync(path.join(work, 'state', 'state.json'), 'utf8')).loadingRowShapes ?? [];
-  assert.equal(shapes.length, 1);
-  assert.ok(!/555|0399|Texting/.test(shapes[0].shape), 'no words or numbers in the saved layout');
   // Text shaped like the banner is a message, judged as text.
   assert.deepEqual(byId(acts, 't-fake-banner'), ['block_report']);
   // Your own message (an invitation to a new number) is never judged, so

@@ -1,6 +1,42 @@
 // Backstop for the model: a code-ish word near a 4-8 digit number.
 export const OTP_RE = /\b(code|passcode|otp|one[- ]time|verification|verify|2fa|login|sign[- ]in)\b[\s\S]{0,60}\b\d{4,8}\b|\b\d{4,8}\b[\s\S]{0,60}\b(code|passcode|otp|verification)\b/i;
 
+const EXTRACT_KEYS = ['summary', 'date', 'amount', 'code'];
+function extractOf(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  for (const k of EXTRACT_KEYS) if (raw[k] != null && String(raw[k]).trim()) out[k] = String(raw[k]).trim().slice(0, 120);
+  return Object.keys(out).length ? out : null;
+}
+
+export function parseVerdict(verdict, { text, threshold, pictures = 0 }) {
+  // Custom prompts from before spam_probability may still answer with
+  // {spam, confidence}.
+  const score = Math.min(1, Math.max(0, Number(
+    verdict.spam_probability ??
+      (verdict.spam === true ? verdict.confidence ?? 1 : 1 - (verdict.confidence ?? 1)),
+  ) || 0));
+  const rawSpam = score >= 0.5;
+  return {
+    // Spam wins: sender-written text can always look like a code ("verify
+    // your account, code 123456: http://..."), so OTP never overrides it.
+    otp: !rawSpam && (verdict.otp === true || OTP_RE.test(text)),
+    // The regex is only a labelling backstop; cleanup acts on the model's own
+    // flag, since a person's "gate code is 4821" can match the regex.
+    otpByModel: !rawSpam && verdict.otp === true,
+    marketing: !rawSpam && verdict.marketing === true,
+    notification: !rawSpam && verdict.notification === true,
+    transactional: !rawSpam && verdict.transactional === true,
+    // What the message is about, for the digest: only known keys, short.
+    extract: extractOf(verdict.extract),
+    spam: rawSpam && score >= threshold,
+    rawSpam,
+    score,
+    reason: String(verdict.reason ?? ''),
+    pictures,
+  };
+}
+
 // One quick retry on network-level failures, which the gateway occasionally
 // produces; HTTP errors are returned as-is.
 async function fetchWithRetry(url, init) {

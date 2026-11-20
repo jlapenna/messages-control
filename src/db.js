@@ -23,7 +23,8 @@ export class Db {
         reason text,
         score real,
         rule text,
-        method text
+        method text,
+        text text
       );
       create index if not exists events_time on events(time);
       create index if not exists events_thread on events(thread_id);
@@ -49,19 +50,16 @@ export class Db {
         time integer,
         msg_time integer,
         media text,
-        text text
+        text text,
+        extract text
       );
     `);
-    // Keep the message preview with the action, even when a later verdict
-    // changes or the page's bounded activity log expires.
+    // Upgrade databases created before events.text and verdicts.extract existed.
     if (!this.db.prepare('pragma table_info(events)').all().some((c) => c.name === 'text')) {
       this.db.exec('alter table events add column text text');
     }
-    // Added later: what a transactional message is about (JSON).
-    try {
+    if (!this.db.prepare('pragma table_info(verdicts)').all().some((c) => c.name === 'extract')) {
       this.db.exec('alter table verdicts add column extract text');
-    } catch (err) {
-      if (!/duplicate column/i.test(err.message)) throw err;
     }
     fs.chmodSync(file, 0o600);
     this.insertEvent = this.db.prepare(
@@ -163,6 +161,10 @@ export class Db {
   // being held for them.
   decided() {
     return new Map(this.db.prepare("select thread_id, max(time) as time from events where rule = 'review' and label is not 'error' group by thread_id").all().map((r) => [r.thread_id, r.time]));
+  }
+
+  threadNames() {
+    return new Map(this.db.prepare('select thread_id, name from events where name is not null group by thread_id').all().map((r) => [r.thread_id, r.name]));
   }
 
   events({ since = 0, limit = 50 } = {}) {

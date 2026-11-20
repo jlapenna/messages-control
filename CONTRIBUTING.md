@@ -2,7 +2,7 @@
 
 ## Development setup
 
-Use Node.js 24. Read [AGENTS.md](AGENTS.md) and the
+Use Node.js 26. Read [AGENTS.md](AGENTS.md) and the
 [development skill](.agents/skills/messages-control-dev/SKILL.md) for repository
 workflow and account authority. Create a feature worktree from current
 `origin/main`, then run:
@@ -78,11 +78,11 @@ The required `gitleaks` check uses pinned Gitleaks 8.18.2, verifies its download
 checksum, and scans all available Git history. It does not require an Action
 license secret. A local scanner on PATH can be used without `GITLEAKS_BIN`.
 
-Two dependency overrides address upstream transitive advisories. The root
-package uses undici 7.29.1 for Nx 23.3.0. The desktop package uses global-agent
-4.1.3 for @electron/get 3.x, removing its roarr/sprintf-js dependency chain.
-Remove each override when the upstream dependency resolves a safe version;
-verify the desktop proxy fixture when changing its downloader dependencies.
+Dependency overrides in `package.json` and `desktop/package.json` address
+upstream transitive advisories (currently `undici` and `minimatch` in the root
+package, and `global-agent` and `minimatch` in `desktop`). Remove each override
+when the upstream dependency resolves a safe version; verify the desktop proxy
+fixture when changing its downloader dependencies.
 
 ## Source layout
 
