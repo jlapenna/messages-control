@@ -17,6 +17,8 @@ Use the shared
 and [land-pr](https://github.com/jlapenna/repo-tools/blob/main/plugins/repo-tools/skills/land-pr/SKILL.md)
 workflows for Git safety and publication.
 
+For LCARS pull request reviews, read the [review configuration](CONTRIBUTING.md#lcars-code-review) before evaluating the diff.
+
 ## Routes
 
 | Task | Start at | Proof |
