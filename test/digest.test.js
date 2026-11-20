@@ -81,9 +81,9 @@ test('inspectDigestSchedule resolves effective systemd state dir across env, dro
   const defaultDir = path.join(homeDir, '.local', 'state', 'messages-control');
   const stateA = path.join(root, 'state-a');
   const stateB = path.join(root, 'state-b');
-  const stateShared = path.join(root, 'state-shared');
+  const stateSpaced = path.join(root, 'Message State');
   const stateDropIn = path.join(root, 'state-dropin');
-  for (const d of [wantsDir, dropInDir, defaultDir, stateA, stateB, stateShared, stateDropIn]) {
+  for (const d of [wantsDir, dropInDir, defaultDir, stateA, stateB, stateSpaced, stateDropIn]) {
     fs.mkdirSync(d, { recursive: true });
   }
 
@@ -91,6 +91,7 @@ test('inspectDigestSchedule resolves effective systemd state dir across env, dro
   const serviceFile = path.join(unitDir, 'messages-control-digest.service');
   const wantLink = path.join(wantsDir, 'messages-control-digest.timer');
   const noSystemd = async () => null;
+  const baseArgv = ['/usr/bin/node', '/app/bin/messages-control.js', 'digest', '--send'];
 
   // Not enabled yet.
   assert.deepEqual(
@@ -113,56 +114,81 @@ test('inspectDigestSchedule resolves effective systemd state dir across env, dro
   assert.equal((await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, true);
   assert.equal((await inspectDigestSchedule(watcherCustomXdg, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, false);
 
-  // When both units inherit MESSAGES_CONTROL_STATE from the systemd user manager, both match stateShared.
+  // Live probe uses loaded systemd argv[] and raw managerEnv (including paths with spaces),
+  // ignoring un-reloaded edits on disk.
+  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send --state-dir ${stateB}\n`);
   const managerQuery = async () => ({
-    active: true,
-    unitFiles: [serviceFile],
+    enabled: true,
+    execStarts: [baseArgv],
+    envAssignments: [],
+    envFiles: [],
     workingDirectory: homeDir,
-    managerEnv: { HOME: homeDir, MESSAGES_CONTROL_STATE: stateShared },
+    managerEnv: { HOME: homeDir, MESSAGES_CONTROL_STATE: stateSpaced },
     sinceMs: 1700000000000,
   });
   assert.deepEqual(
-    await inspectDigestSchedule(stateShared, { unitDir, homeDir, querySystemd: managerQuery }),
+    await inspectDigestSchedule(stateSpaced, { unitDir, homeDir, querySystemd: managerQuery }),
     { scheduled: true, sinceMs: 1700000000000 },
   );
   assert.deepEqual(
-    await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: managerQuery }),
+    await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: managerQuery }),
     { scheduled: false, sinceMs: null },
   );
 
-  // Explicit --state-dir A overrides manager env and matches only A.
-  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send --state-dir ${stateA}\n`);
-  assert.equal((await inspectDigestSchedule(stateA, { unitDir, homeDir, querySystemd: managerQuery })).scheduled, true);
-  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: managerQuery })).scheduled, false);
+  // Explicit --state-dir A in loaded argv[] overrides manager env and matches only A.
+  const argQuery = async () => ({
+    enabled: true,
+    execStarts: [[...baseArgv, '--state-dir', stateA]],
+    envAssignments: [],
+    envFiles: [],
+    workingDirectory: homeDir,
+    managerEnv: { HOME: homeDir, MESSAGES_CONTROL_STATE: stateSpaced },
+    sinceMs: 1700000000000,
+  });
+  assert.equal((await inspectDigestSchedule(stateA, { unitDir, homeDir, querySystemd: argQuery })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: argQuery })).scheduled, false);
 
-  // Drop-in Environment=MESSAGES_CONTROL_STATE overrides base default without --state-dir.
-  fs.writeFileSync(serviceFile, '[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n');
-  const dropIn = path.join(dropInDir, '10-state.conf');
-  fs.writeFileSync(dropIn, `[Service]\nEnvironment=MESSAGES_CONTROL_STATE=${stateDropIn}\n`);
-  const dropInQuery = async () => ({
-    active: true,
-    unitFiles: [serviceFile, dropIn],
+  // EnvironmentFile= overrides Environment= per systemd.exec(5) in both live and fallback paths.
+  const envFile = path.join(root, 'digest.env');
+  fs.writeFileSync(envFile, `MESSAGES_CONTROL_STATE=${stateB}\n`);
+  const envPrecedenceQuery = async () => ({
+    enabled: true,
+    execStarts: [baseArgv],
+    envAssignments: [`MESSAGES_CONTROL_STATE=${stateA}`],
+    envFiles: [envFile],
     workingDirectory: homeDir,
     managerEnv: { HOME: homeDir },
     sinceMs: 1700001000000,
   });
-  assert.equal((await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, true);
-  assert.equal((await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, false);
-  // Filesystem fallback also reads messages-control-digest.service.d/*.conf drop-ins.
-  assert.equal((await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, true);
-  assert.equal((await inspectDigestSchedule(defaultDir, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, false);
+  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: envPrecedenceQuery })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(stateA, { unitDir, homeDir, querySystemd: envPrecedenceQuery })).scheduled, false);
 
-  // Drop-in EnvironmentFile= is respected before Environment= overrides.
-  const envFile = path.join(root, 'digest.env');
-  fs.writeFileSync(envFile, `MESSAGES_CONTROL_STATE=${stateB}\n`);
+  // Filesystem fallback also applies EnvironmentFile= after Environment= across drop-ins.
+  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nEnvironment=MESSAGES_CONTROL_STATE=${stateA}\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n`);
+  const dropIn = path.join(dropInDir, '10-state.conf');
   fs.writeFileSync(dropIn, `[Service]\nEnvironmentFile=-${envFile}\n`);
-  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, true);
-  assert.equal((await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: dropInQuery })).scheduled, false);
+  assert.equal((await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, true);
+  assert.equal((await inspectDigestSchedule(stateA, { unitDir, homeDir, querySystemd: noSystemd })).scheduled, false);
 
-  // Inactive timer returns scheduled=false even if unit files match.
-  const inactiveQuery = async () => ({ active: false });
+  // An enabled timer with no ActiveEnterTimestamp (e.g. stopped/failed) remains scheduled=true
+  // and falls back to the enablement symlink timestamp so staleness alerts still fire.
+  const stoppedButEnabledQuery = async () => ({
+    enabled: true,
+    execStarts: [[...baseArgv, '--state-dir', stateDropIn]],
+    envAssignments: [],
+    envFiles: [],
+    workingDirectory: homeDir,
+    managerEnv: { HOME: homeDir },
+    sinceMs: null,
+  });
+  const stoppedRes = await inspectDigestSchedule(stateDropIn, { unitDir, homeDir, querySystemd: stoppedButEnabledQuery });
+  assert.equal(stoppedRes.scheduled, true);
+  assert.equal(typeof stoppedRes.sinceMs, 'number');
+
+  // Disabled/masked timer returns scheduled=false even if unit files exist.
+  const disabledQuery = async () => ({ enabled: false });
   assert.deepEqual(
-    await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: inactiveQuery }),
+    await inspectDigestSchedule(stateB, { unitDir, homeDir, querySystemd: disabledQuery }),
     { scheduled: false, sinceMs: null },
   );
 

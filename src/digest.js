@@ -115,7 +115,51 @@ function parseServiceUnit(content, state) {
   }
 }
 
-function unitMatchesStateDir(unitFiles, targetStateDir, { managerEnv = {}, homeDir = os.homedir(), workingDirectory } = {}) {
+function parseEnvAssignments(entries, target) {
+  for (const pair of entries) {
+    const eq = pair.indexOf('=');
+    if (eq > 0) target[pair.slice(0, eq)] = pair.slice(eq + 1);
+  }
+}
+
+function resolveEffectiveStateDir({ execStarts, envAssignments, envFiles, managerEnv = {}, homeDir = os.homedir(), workingDirectory = '' }) {
+  // Apply systemd.exec(5) precedence: user-manager env -> Environment= -> EnvironmentFile= -> CLI --state-dir.
+  const effectiveEnv = { ...managerEnv };
+  parseEnvAssignments(envAssignments, effectiveEnv);
+  for (const file of envFiles) {
+    const cleaned = String(file ?? '').replace(/^-/, '');
+    if (cleaned) parseEnvFile(cleaned, effectiveEnv);
+  }
+
+  const effectiveHome = effectiveEnv.HOME || homeDir;
+  const fallbackStateDir =
+    effectiveEnv.MESSAGES_CONTROL_STATE ||
+    path.join(effectiveEnv.XDG_STATE_HOME || path.join(effectiveHome, '.local', 'state'), 'messages-control');
+  const rawWd = String(workingDirectory ?? '').replace(/^!/, '');
+  const baseDir = !rawWd || rawWd === '~' ? effectiveHome : rawWd.startsWith('~/') ? path.join(effectiveHome, rawWd.slice(2)) : rawWd;
+
+  const matches = [];
+  for (const argv of execStarts) {
+    if (!argv.includes('digest') || !argv.includes('--send')) continue;
+    let serviceStateDir = fallbackStateDir;
+    let invalid = false;
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] === '--state-dir') {
+        if (i + 1 >= argv.length) {
+          invalid = true;
+          break;
+        }
+        serviceStateDir = argv[++i];
+      } else if (argv[i].startsWith('--state-dir=')) {
+        serviceStateDir = argv[i].slice('--state-dir='.length);
+      }
+    }
+    if (!invalid && serviceStateDir) matches.push(canonicalPath(serviceStateDir, baseDir));
+  }
+  return matches;
+}
+
+function unitFilesMatchStateDir(unitFiles, targetStateDir, { managerEnv = {}, homeDir = os.homedir(), workingDirectory } = {}) {
   const state = { execStarts: [], envFiles: [], envAssignments: [], workingDirectory: workingDirectory ?? '' };
   let readAny = false;
   for (const file of unitFiles) {
@@ -127,122 +171,177 @@ function unitMatchesStateDir(unitFiles, targetStateDir, { managerEnv = {}, homeD
     } catch {}
   }
   if (!readAny || !state.execStarts.length) return false;
-
-  // Apply systemd precedence: user-manager env -> EnvironmentFile -> Environment= -> CLI --state-dir.
-  const effectiveEnv = { ...managerEnv };
-  for (const entry of state.envFiles) {
-    const cleaned = entry.replace(/^-/, '');
-    if (cleaned) parseEnvFile(cleaned, effectiveEnv);
-  }
-  for (const pair of state.envAssignments) {
-    const eq = pair.indexOf('=');
-    if (eq > 0) effectiveEnv[pair.slice(0, eq)] = pair.slice(eq + 1);
-  }
-
-  const effectiveHome = effectiveEnv.HOME || homeDir;
-  const fallbackStateDir =
-    effectiveEnv.MESSAGES_CONTROL_STATE ||
-    path.join(effectiveEnv.XDG_STATE_HOME || path.join(effectiveHome, '.local', 'state'), 'messages-control');
-  const rawWd = state.workingDirectory.replace(/^!/, '');
-  const baseDir = !rawWd || rawWd === '~' ? effectiveHome : rawWd.startsWith('~/') ? path.join(effectiveHome, rawWd.slice(2)) : rawWd;
   const expected = canonicalPath(targetStateDir);
-
-  for (const cmd of state.execStarts) {
-    const args = splitUnitArgs(cmd);
-    if (!args.includes('digest') || !args.includes('--send')) continue;
-    let serviceStateDir = fallbackStateDir;
-    let invalid = false;
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === '--state-dir') {
-        if (i + 1 >= args.length) {
-          invalid = true;
-          break;
-        }
-        serviceStateDir = args[++i];
-      } else if (args[i].startsWith('--state-dir=')) {
-        serviceStateDir = args[i].slice('--state-dir='.length);
-      }
-    }
-    if (!invalid && serviceStateDir && canonicalPath(serviceStateDir, baseDir) === expected) return true;
-  }
-  return false;
+  const dirs = resolveEffectiveStateDir({
+    execStarts: state.execStarts.map(splitUnitArgs),
+    envAssignments: state.envAssignments,
+    envFiles: state.envFiles,
+    managerEnv,
+    homeDir,
+    workingDirectory: state.workingDirectory,
+  });
+  return dirs.includes(expected);
 }
 
-function parseKeyValues(text) {
-  const out = {};
-  for (const line of text.split(/\r?\n/)) {
-    const eq = line.indexOf('=');
-    if (eq > 0) out[line.slice(0, eq)] = line.slice(eq + 1);
-  }
-  return out;
+const ENABLED_UNIT_STATES = new Set(['enabled', 'enabled-runtime', 'linked', 'linked-runtime']);
+
+function parseJsonLines(text) {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .map((l) => JSON.parse(l));
 }
 
-function parseSystemdTimestampMs(value) {
-  const m = /^@(\d+)$/.exec(String(value ?? '').trim());
-  if (!m) return null;
-  const sec = Number(m[1]);
-  return Number.isFinite(sec) && sec > 0 ? sec * 1000 : null;
+async function busctlJson(args) {
+  const { stdout } = await execFileAsync('busctl', ['--user', '--json=short', ...args], {
+    timeout: 3000,
+    encoding: 'utf8',
+  });
+  return parseJsonLines(stdout);
 }
 
+// Queries systemd's live in-memory manager state via D-Bus JSON (busctl),
+// returning exact loaded ExecStart argv[], Environment, EnvironmentFiles,
+// WorkingDirectory, and raw user-manager Environment without shell-quoting.
 async function defaultQuerySystemd() {
   try {
-    const { stdout: timerOut } = await execFileAsync(
-      'systemctl',
-      ['--user', 'show', 'messages-control-digest.timer', '--property=LoadState,ActiveState,UnitFileState,Unit,ActiveEnterTimestamp', '--timestamp=unix'],
-      { timeout: 3000, encoding: 'utf8' },
-    );
-    const timer = parseKeyValues(timerOut);
-    if (timer.LoadState !== 'loaded' || timer.ActiveState !== 'active' || timer.UnitFileState === 'masked') {
-      return { active: false };
-    }
-    const serviceUnit = timer.Unit || 'messages-control-digest.service';
-    const [{ stdout: svcOut }, { stdout: envOut }] = await Promise.all([
-      execFileAsync(
-        'systemctl',
-        ['--user', 'show', serviceUnit, '--property=LoadState,FragmentPath,DropInPaths,WorkingDirectory'],
-        { timeout: 3000, encoding: 'utf8' },
-      ),
-      execFileAsync('systemctl', ['--user', 'show-environment'], { timeout: 3000, encoding: 'utf8' }),
+    const [loadTimer] = await busctlJson([
+      'call',
+      'org.freedesktop.systemd1',
+      '/org/freedesktop/systemd1',
+      'org.freedesktop.systemd1.Manager',
+      'LoadUnit',
+      's',
+      'messages-control-digest.timer',
     ]);
-    const svc = parseKeyValues(svcOut);
-    if (svc.LoadState !== 'loaded' || !svc.FragmentPath) return { active: false };
-    const dropIns = svc.DropInPaths ? splitUnitArgs(svc.DropInPaths) : [];
+    const timerPath = loadTimer?.data?.[0];
+    if (!timerPath) return { enabled: false };
+
+    const [timerProps, timerUnitProp] = await Promise.all([
+      busctlJson([
+        'get-property',
+        'org.freedesktop.systemd1',
+        timerPath,
+        'org.freedesktop.systemd1.Unit',
+        'LoadState',
+        'UnitFileState',
+        'ActiveEnterTimestamp',
+      ]),
+      busctlJson([
+        'get-property',
+        'org.freedesktop.systemd1',
+        timerPath,
+        'org.freedesktop.systemd1.Timer',
+        'Unit',
+      ]),
+    ]);
+    const loadState = timerProps[0]?.data;
+    const unitFileState = timerProps[1]?.data;
+    const activeEnterUs = Number(timerProps[2]?.data ?? 0);
+    if (loadState !== 'loaded' || !ENABLED_UNIT_STATES.has(unitFileState)) {
+      return { enabled: false };
+    }
+
+    const serviceUnit = timerUnitProp[0]?.data || 'messages-control-digest.service';
+    const [loadSvc] = await busctlJson([
+      'call',
+      'org.freedesktop.systemd1',
+      '/org/freedesktop/systemd1',
+      'org.freedesktop.systemd1.Manager',
+      'LoadUnit',
+      's',
+      serviceUnit,
+    ]);
+    const svcPath = loadSvc?.data?.[0];
+    if (!svcPath) return { enabled: false };
+
+    const [svcUnitProps, svcProps, mgrEnvProps] = await Promise.all([
+      busctlJson([
+        'get-property',
+        'org.freedesktop.systemd1',
+        svcPath,
+        'org.freedesktop.systemd1.Unit',
+        'LoadState',
+      ]),
+      busctlJson([
+        'get-property',
+        'org.freedesktop.systemd1',
+        svcPath,
+        'org.freedesktop.systemd1.Service',
+        'ExecStart',
+        'Environment',
+        'EnvironmentFiles',
+        'WorkingDirectory',
+      ]),
+      busctlJson([
+        'get-property',
+        'org.freedesktop.systemd1',
+        '/org/freedesktop/systemd1',
+        'org.freedesktop.systemd1.Manager',
+        'Environment',
+      ]),
+    ]);
+    if (svcUnitProps[0]?.data !== 'loaded') return { enabled: false };
+
+    const execStarts = (svcProps[0]?.data ?? []).map((entry) => entry?.[1]).filter(Array.isArray);
+    const envAssignments = Array.isArray(svcProps[1]?.data) ? svcProps[1].data : [];
+    const envFiles = (svcProps[2]?.data ?? []).map((entry) => entry?.[0]).filter(Boolean);
+    const workingDirectory = typeof svcProps[3]?.data === 'string' ? svcProps[3].data : '';
+    const managerEnv = {};
+    parseEnvAssignments(Array.isArray(mgrEnvProps[0]?.data) ? mgrEnvProps[0].data : [], managerEnv);
+
     return {
-      active: true,
-      unitFiles: [svc.FragmentPath, ...dropIns],
-      workingDirectory: svc.WorkingDirectory || '',
-      managerEnv: parseKeyValues(envOut),
-      sinceMs: parseSystemdTimestampMs(timer.ActiveEnterTimestamp),
+      enabled: true,
+      execStarts,
+      envAssignments,
+      envFiles,
+      workingDirectory,
+      managerEnv,
+      sinceMs: Number.isFinite(activeEnterUs) && activeEnterUs > 0 ? Math.floor(activeEnterUs / 1000) : null,
     };
   } catch {
     return null;
   }
 }
 
-// Resolves whether messages-control-digest.timer is actively scheduled to run
-// `digest --send` against targetStateDir, accounting for systemd user-manager
-// environment, drop-ins, EnvironmentFile, Environment=, and --state-dir.
+function timerWantMtimeMs(unitDir) {
+  if (!unitDir) return null;
+  const timerWant = path.join(unitDir, 'timers.target.wants', 'messages-control-digest.timer');
+  try {
+    if (fs.realpathSync(timerWant) === '/dev/null') return null;
+    return Math.floor(fs.lstatSync(timerWant).mtimeMs);
+  } catch {
+    return null;
+  }
+}
+
+// Resolves whether messages-control-digest.timer is enabled to run
+// `digest --send` against targetStateDir, using systemd's loaded in-memory
+// unit and user-manager environment (or unit files + drop-ins when systemd is
+// unavailable). Remains true even if an enabled timer has stopped or failed so
+// staleness alerts still fire.
 export async function inspectDigestSchedule(targetStateDir, { unitDir, homeDir = os.homedir(), managerEnv, querySystemd = defaultQuerySystemd } = {}) {
   if (!targetStateDir) return { scheduled: false, sinceMs: null };
   const live = querySystemd ? await querySystemd() : null;
   if (live) {
-    if (!live.active) return { scheduled: false, sinceMs: null };
-    const matches = unitMatchesStateDir(live.unitFiles ?? [], targetStateDir, {
+    if (!live.enabled) return { scheduled: false, sinceMs: null };
+    const expected = canonicalPath(targetStateDir);
+    const dirs = resolveEffectiveStateDir({
+      execStarts: live.execStarts ?? [],
+      envAssignments: live.envAssignments ?? [],
+      envFiles: live.envFiles ?? [],
       managerEnv: live.managerEnv ?? {},
       homeDir,
-      workingDirectory: live.workingDirectory,
+      workingDirectory: live.workingDirectory ?? '',
     });
-    return { scheduled: matches, sinceMs: matches ? (live.sinceMs ?? null) : null };
+    const matches = dirs.includes(expected);
+    const sinceMs = live.sinceMs ?? timerWantMtimeMs(unitDir);
+    return { scheduled: matches, sinceMs: matches ? sinceMs : null };
   }
   if (!unitDir) return { scheduled: false, sinceMs: null };
-  const timerWant = path.join(unitDir, 'timers.target.wants', 'messages-control-digest.timer');
-  let sinceMs = null;
-  try {
-    if (fs.realpathSync(timerWant) === '/dev/null') return { scheduled: false, sinceMs: null };
-    sinceMs = Math.floor(fs.lstatSync(timerWant).mtimeMs);
-  } catch {
-    return { scheduled: false, sinceMs: null };
-  }
+  const sinceMs = timerWantMtimeMs(unitDir);
+  if (sinceMs == null) return { scheduled: false, sinceMs: null };
   const dropInDir = path.join(unitDir, 'messages-control-digest.service.d');
   let dropIns = [];
   try {
@@ -253,7 +352,7 @@ export async function inspectDigestSchedule(targetStateDir, { unitDir, homeDir =
       .map((f) => path.join(dropInDir, f));
   } catch {}
   const unitFiles = [path.join(unitDir, 'messages-control-digest.service'), ...dropIns];
-  const matches = unitMatchesStateDir(unitFiles, targetStateDir, {
+  const matches = unitFilesMatchStateDir(unitFiles, targetStateDir, {
     managerEnv: managerEnv ?? { HOME: homeDir },
     homeDir,
   });
