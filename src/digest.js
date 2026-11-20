@@ -1,6 +1,123 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 // A plain-text summary of what happened, from the events table.
 const ACTED = /^(blocked|deleted|archived)/;
 const PERIOD = { h: 3600000, d: 86400000, m: 60000 };
+
+function canonicalPath(p, baseDir) {
+  const resolved = baseDir ? path.resolve(baseDir, p) : path.resolve(p);
+  try {
+    return fs.realpathSync(resolved);
+  } catch {
+    return resolved;
+  }
+}
+
+function splitUnitArgs(line) {
+  const args = [];
+  let cur = '';
+  let quote = null;
+  let esc = false;
+  for (const ch of line) {
+    if (esc) {
+      cur += ch;
+      esc = false;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '\\') esc = true;
+      else if (ch === '"') quote = null;
+      else cur += ch;
+    } else if (quote === "'") {
+      if (ch === "'") quote = null;
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === '\\') {
+      esc = true;
+    } else if (/\s/.test(ch)) {
+      if (cur) {
+        args.push(cur);
+        cur = '';
+      }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) args.push(cur);
+  return args;
+}
+
+// True only when messages-control-digest.timer is enabled and its service unit
+// runs `digest --send` against the same state directory as this watcher.
+export function isDigestTimerScheduled(targetStateDir, { unitDir, defaultStateDir, homeDir = os.homedir() } = {}) {
+  if (!unitDir || !targetStateDir) return false;
+  const timerWant = path.join(unitDir, 'timers.target.wants', 'messages-control-digest.timer');
+  try {
+    if (fs.realpathSync(timerWant) === '/dev/null') return false;
+  } catch {
+    return false;
+  }
+  let unit;
+  try {
+    unit = fs.readFileSync(path.join(unitDir, 'messages-control-digest.service'), 'utf8');
+  } catch {
+    return false;
+  }
+  const lines = unit.replace(/\\\r?\n/g, ' ').split(/\r?\n/);
+  let inService = false;
+  let execStarts = [];
+  const unitEnv = {};
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
+    const sec = /^\[(.+)\]$/.exec(line);
+    if (sec) {
+      inService = sec[1] === 'Service';
+      continue;
+    }
+    if (!inService) continue;
+    const execMatch = /^ExecStart\s*=\s*(.*)$/.exec(line);
+    if (execMatch) {
+      const val = execMatch[1].trim();
+      if (!val) execStarts = [];
+      else execStarts.push(val);
+      continue;
+    }
+    const envMatch = /^Environment\s*=\s*(.*)$/.exec(line);
+    if (envMatch) {
+      for (const pair of splitUnitArgs(envMatch[1].trim())) {
+        const eq = pair.indexOf('=');
+        if (eq > 0) unitEnv[pair.slice(0, eq)] = pair.slice(eq + 1);
+      }
+    }
+  }
+  const fallbackStateDir =
+    unitEnv.MESSAGES_CONTROL_STATE ||
+    (unitEnv.XDG_STATE_HOME ? path.join(unitEnv.XDG_STATE_HOME, 'messages-control') : defaultStateDir);
+  const expected = canonicalPath(targetStateDir);
+  for (const cmd of execStarts) {
+    const args = splitUnitArgs(cmd);
+    if (!args.includes('digest') || !args.includes('--send')) continue;
+    let serviceStateDir = fallbackStateDir;
+    let invalid = false;
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--state-dir') {
+        if (i + 1 >= args.length) {
+          invalid = true;
+          break;
+        }
+        serviceStateDir = args[++i];
+      } else if (args[i].startsWith('--state-dir=')) {
+        serviceStateDir = args[i].slice('--state-dir='.length);
+      }
+    }
+    if (!invalid && serviceStateDir && canonicalPath(serviceStateDir, homeDir) === expected) return true;
+  }
+  return false;
+}
 
 // "24h", "7d", "90m" → milliseconds.
 export function parseSince(text, fallback = '24h') {

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Db } from '../src/db.js';
-import { digestText, parseSince } from '../src/digest.js';
+import { digestText, isDigestTimerScheduled, parseSince } from '../src/digest.js';
 
 test('parseSince reads h, d and m', () => {
   assert.equal(parseSince('24h'), 86400000);
@@ -70,4 +70,49 @@ test('digest --send awaits notify.command and fails non-zero when delivery fails
   assert.equal(failMeta.ok, false);
   assert.equal(failMeta.delivered, 0);
   assert.equal(failSuccess, okSuccess);
+});
+
+test('isDigestTimerScheduled matches only when the enabled timer targets the watcher state dir', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-timer-'));
+  const unitDir = path.join(root, 'systemd', 'user');
+  const wantsDir = path.join(unitDir, 'timers.target.wants');
+  const defaultDir = path.join(root, 'default-state');
+  const stateA = path.join(root, 'state-a');
+  const stateB = path.join(root, 'state-b');
+  fs.mkdirSync(wantsDir, { recursive: true });
+  fs.mkdirSync(defaultDir, { recursive: true });
+  fs.mkdirSync(stateA, { recursive: true });
+  fs.mkdirSync(stateB, { recursive: true });
+
+  const timerFile = path.join(unitDir, 'messages-control-digest.timer');
+  const serviceFile = path.join(unitDir, 'messages-control-digest.service');
+  const wantLink = path.join(wantsDir, 'messages-control-digest.timer');
+
+  // Not enabled yet.
+  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), false);
+
+  fs.writeFileSync(timerFile, '[Timer]\nOnCalendar=*-*-* 08:00:00\n');
+  fs.symlinkSync(timerFile, wantLink);
+  // Missing service unit.
+  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), false);
+
+  // Default state dir matches default watcher, not a custom --state-dir watcher.
+  fs.writeFileSync(serviceFile, '[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n');
+  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), true);
+  assert.equal(isDigestTimerScheduled(stateB, { unitDir, defaultStateDir: defaultDir }), false);
+
+  // Explicit --state-dir A matches only A, never B or default.
+  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send --state-dir ${stateA}\n`);
+  assert.equal(isDigestTimerScheduled(stateA, { unitDir, defaultStateDir: defaultDir }), true);
+  assert.equal(isDigestTimerScheduled(stateB, { unitDir, defaultStateDir: defaultDir }), false);
+  assert.equal(isDigestTimerScheduled(defaultDir, { unitDir, defaultStateDir: defaultDir }), false);
+
+  // Without --send, the unit does not deliver or record digest success.
+  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --state-dir ${stateA}\n`);
+  assert.equal(isDigestTimerScheduled(stateA, { unitDir, defaultStateDir: defaultDir }), false);
+
+  // Environment=MESSAGES_CONTROL_STATE in the unit is respected when --state-dir is omitted.
+  fs.writeFileSync(serviceFile, `[Service]\nType=oneshot\nEnvironment=MESSAGES_CONTROL_STATE=${stateA}\nExecStart=/usr/bin/node /app/bin/messages-control.js digest --send\n`);
+  assert.equal(isDigestTimerScheduled(stateA, { unitDir, defaultStateDir: defaultDir }), true);
+  assert.equal(isDigestTimerScheduled(stateB, { unitDir, defaultStateDir: defaultDir }), false);
 });

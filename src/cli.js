@@ -11,7 +11,7 @@ import { Store } from './store.js';
 import { Db } from './db.js';
 import { heldForReview, undoTarget } from './event-details.js';
 import { notify as sendNotification } from './notify.js';
-import { digestText, parseSince } from './digest.js';
+import { digestText, isDigestTimerScheduled, parseSince } from './digest.js';
 import { sendRequest, startApi } from './api.js';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -245,7 +245,8 @@ function serviceUnitPath() {
 }
 
 function isDigestTimerEnabled() {
-  return fs.existsSync(path.join(path.dirname(serviceUnitPath()), 'timers.target.wants', 'messages-control-digest.timer'));
+  const defaultStateDir = path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), '.local', 'state'), 'messages-control');
+  return isDigestTimerScheduled(stateDir, { unitDir: path.dirname(serviceUnitPath()), defaultStateDir });
 }
 
 function installService() {
