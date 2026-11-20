@@ -20,9 +20,10 @@ vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 The installed LCARS app reviews pull requests. A maintainer can comment
 `/review` to request a review of the current commit, including a Renovate
-update. The workflow uses the Agent LCARS App to publish the `LCARS review` check after the first
-passing verdict. A later blocking verdict reopens the check. A formal change
-request for the current comparison needs an approval or dismissal. After a
+update. The Agent LCARS App publishes the `LCARS review` check after the
+first passing verdict. A later blocking verdict changes that check to failure.
+A formal change request for the current comparison requires a qualifying
+LCARS approval or dismissal of the request before the check can pass. After a
 retarget, a change request without the new comparison receipt is provisional.
 A passing review with the current receipt clears that provisional request.
 GitHub associates the check with a commit. The publisher reconciles reviews
