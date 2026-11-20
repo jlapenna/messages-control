@@ -11,7 +11,7 @@ import { Store } from './store.js';
 import { Db } from './db.js';
 import { heldForReview, undoTarget } from './event-details.js';
 import { notify as sendNotification } from './notify.js';
-import { digestText, inspectDigestSchedule, parseSince, recordDigestSchedule } from './digest.js';
+import { digestText, parseDigestScheduleConfig, parseSince, startDigestScheduler } from './digest.js';
 import { sendRequest, startApi } from './api.js';
 import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
@@ -73,7 +73,7 @@ Commands (default: run)
                    rule would do, without touching anything
 
 Options
-  --digest HH:MM   with install-service: also a daily digest timer
+  --digest HH:MM   with install-service: schedule the daily digest in config.json
   --since 24h      for digest (h, d or m)
   --to NUMBER      for send: a phone number instead of a thread ID
   --send           for digest: send it through the notify channels
@@ -244,8 +244,25 @@ function serviceUnitPath() {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'systemd', 'user', 'messages-control.service');
 }
 
-function getDigestSchedule() {
-  return inspectDigestSchedule(stateDir, { unitDir: path.dirname(serviceUnitPath()) });
+function clearDigestScheduleMeta() {
+  const dbPath = path.join(stateDir, 'state.db');
+  if (!fs.existsSync(dbPath)) return;
+  const db = new Db(dbPath);
+  try {
+    db.setMeta('digestSchedule', null);
+  } finally {
+    db.close();
+  }
+}
+
+function removeLegacyDigestUnits(unitDir) {
+  try {
+    execFileSync('systemctl', ['--user', 'disable', '--now', 'messages-control-digest.timer'], { stdio: 'ignore' });
+  } catch {}
+  for (const name of ['messages-control-digest.service', 'messages-control-digest.timer']) {
+    const f = path.join(unitDir, name);
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  }
 }
 
 function installService() {
@@ -273,51 +290,33 @@ WantedBy=default.target
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, unit);
   console.log(`Wrote ${file}`);
-  const units = ['messages-control'];
   if (flags.digest) {
-    if (!/^\d{1,2}:\d{2}$/.test(flags.digest)) throw new Error('--digest wants HH:MM');
-    const dir = path.dirname(file);
-    fs.writeFileSync(path.join(dir, 'messages-control-digest.service'), `[Unit]
-Description=Messages Control daily digest
-
-[Service]
-Type=oneshot
-ExecStart=${process.execPath} ${path.join(root, 'bin', 'messages-control.js')} digest --send${stateDir !== STATE_DIR ? ` --state-dir ${stateDir}` : ''}
-`);
-    fs.writeFileSync(path.join(dir, 'messages-control-digest.timer'), `[Unit]
-Description=Messages Control daily digest at ${flags.digest}
-
-[Timer]
-OnCalendar=*-*-* ${flags.digest.padStart(5, '0')}:00
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-`);
-    console.log(`Wrote ${path.join(dir, 'messages-control-digest.timer')} (daily at ${flags.digest})`);
-    units.push('messages-control-digest.timer');
+    const parsed = parseDigestScheduleConfig({ time: flags.digest });
+    const config = readConfig();
+    writeConfig({ ...config, digest: { ...(config.digest ?? {}), time: parsed.time } });
+    clearDigestScheduleMeta();
+    console.log(`Scheduled daily digest at ${parsed.time} in ${CONFIG_FILE}`);
+    removeLegacyDigestUnits(path.dirname(file));
   }
   if (flags.enable) {
     execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' });
-    execFileSync('systemctl', ['--user', 'enable', '--now', ...units], { stdio: 'inherit' });
+    execFileSync('systemctl', ['--user', 'enable', '--now', 'messages-control'], { stdio: 'inherit' });
     console.log('Started. Logs: journalctl --user -fu messages-control');
   } else {
-    console.log(`Start it: systemctl --user daemon-reload && systemctl --user enable --now ${units.join(' ')}`);
+    console.log('Start it: systemctl --user daemon-reload && systemctl --user enable --now messages-control');
   }
   console.log('To keep it running while logged out: loginctl enable-linger (WSL: sudo loginctl enable-linger $USER)');
 }
 
 function uninstallService() {
   const file = serviceUnitPath();
-  for (const unit of ['messages-control', 'messages-control-digest.timer']) {
-    try {
-      execFileSync('systemctl', ['--user', 'disable', '--now', unit], { stdio: 'ignore' });
-    } catch {}
-  }
-  for (const f of [file, ...['messages-control-digest.service', 'messages-control-digest.timer'].map((n) => path.join(path.dirname(file), n))]) {
-    if (fs.existsSync(f)) fs.unlinkSync(f);
-  }
-  console.log(`Removed ${file} (and the digest timer, if any)`);
+  try {
+    execFileSync('systemctl', ['--user', 'disable', '--now', 'messages-control'], { stdio: 'ignore' });
+  } catch {}
+  if (fs.existsSync(file)) fs.unlinkSync(file);
+  removeLegacyDigestUnits(path.dirname(file));
+  clearDigestScheduleMeta();
+  console.log(`Removed ${file} (and any legacy digest timer)`);
 }
 
 function runningPid() {
@@ -442,18 +441,12 @@ async function main() {
       const delivered = sent.filter(Boolean).length;
       if (!sent.length) {
         console.log('no notify channel configured');
+      } else if (delivered === sent.length) {
+        console.log(`sent via ${delivered} channel(s)`);
       } else {
-        const now = Date.now();
-        const ok = delivered === sent.length;
-        db.setMeta('lastDigest', { time: now, ok, delivered, total: sent.length });
-        if (ok) db.setMeta('lastDigestSuccess', now);
-        if (ok) {
-          console.log(`sent via ${delivered} channel(s)`);
-        } else {
-          console.error(`digest delivery failed (${delivered}/${sent.length} channel(s) succeeded)`);
-          db.close();
-          process.exit(EXIT_ERROR);
-        }
+        console.error(`digest delivery failed (${delivered}/${sent.length} channel(s) succeeded)`);
+        db.close();
+        process.exit(EXIT_ERROR);
       }
     }
     db.close();
@@ -486,9 +479,11 @@ async function main() {
 
   const { context, page } = await launchBrowser({ profileDir: path.join(stateDir, 'profile'), headed: flags.headed });
   let apiServer = null;
+  let digestScheduler = null;
   const shutdown = async (code = 0) => {
     if (exiting) return;
     exiting = true;
+    digestScheduler?.stop();
     apiServer?.close();
     store.flush();
     db.close();
@@ -705,6 +700,7 @@ async function main() {
   // run: content.js does the watching. After a reload the page starts over
   // without it, and the phone can unpair us; both are mended here.
   fs.writeFileSync(PID_FILE, String(process.pid));
+  digestScheduler = startDigestScheduler({ db, settings, notify: sendNotification });
   // The local API: healthz and metrics for monitoring, the dashboard at /.
   const apiConf = { ...settings.api };
   if (apiConf.port > 0) {
@@ -720,8 +716,7 @@ async function main() {
       return { ok: alive && paired, alive, paired, pid: process.pid, uptimeSeconds: Math.floor(process.uptime()) };
     };
     try {
-      recordDigestSchedule(db, await getDigestSchedule());
-      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, messageEvents, policy: loadPolicy(), digestScheduled: getDigestSchedule });
+      apiServer = await startApi({ settings, bind: apiConf.bind, port: apiConf.port, token: apiConf.token, hosts: apiConf.hosts ?? [], db, store, backend, health, deliver, messageEvents, policy: loadPolicy() });
     } catch (err) {
       console.warn(`API not started (${err.message}); healthz and the dashboard are off.`);
     }

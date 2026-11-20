@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DEFAULTS } from '../settings.js';
+import { parseDigestScheduleConfig } from './digest.js';
 
 const home = os.homedir();
 export const CONFIG_FILE =
@@ -43,9 +44,13 @@ export function loadSettings(overrides = {}) {
   const s = { ...DEFAULTS, ...file, ...env, ...overrides };
   // Nested settings (api, notify) merge key by key, so a config that only
   // sets api.token keeps the default port.
-  for (const key of ['api', 'notify']) {
+  for (const key of ['api', 'notify', 'digest']) {
+    if (file[key] != null && (typeof file[key] !== 'object' || Array.isArray(file[key]))) {
+      throw new Error(`${key} config must be an object`);
+    }
     if (DEFAULTS[key] && typeof DEFAULTS[key] === 'object') s[key] = { ...DEFAULTS[key], ...(file[key] ?? {}), ...(overrides[key] ?? {}) };
   }
   if (!MODES[s.mode]) throw new Error(`unknown mode "${s.mode}" (spam or full)`);
+  parseDigestScheduleConfig(s.digest);
   return { ...s, ...MODES[s.mode] };
 }

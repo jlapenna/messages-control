@@ -1,386 +1,164 @@
-import { execFile } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-
-// A plain-text summary of what happened, from the events table.
+// A plain-text summary of what happened, from the events table, plus the
+// watcher's in-process daily digest scheduler.
 const ACTED = /^(blocked|deleted|archived)/;
 const PERIOD = { h: 3600000, d: 86400000, m: 60000 };
-
-function canonicalPath(p, baseDir) {
-  const resolved = baseDir ? path.resolve(baseDir, p) : path.resolve(p);
-  try {
-    return fs.realpathSync(resolved);
-  } catch {
-    return resolved;
-  }
-}
-
-function splitUnitArgs(line) {
-  const args = [];
-  let cur = '';
-  let quote = null;
-  let esc = false;
-  for (const ch of line) {
-    if (esc) {
-      cur += ch;
-      esc = false;
-      continue;
-    }
-    if (quote === '"') {
-      if (ch === '\\') esc = true;
-      else if (ch === '"') quote = null;
-      else cur += ch;
-    } else if (quote === "'") {
-      if (ch === "'") quote = null;
-      else cur += ch;
-    } else if (ch === '"' || ch === "'") {
-      quote = ch;
-    } else if (ch === '\\') {
-      esc = true;
-    } else if (/\s/.test(ch)) {
-      if (cur) {
-        args.push(cur);
-        cur = '';
-      }
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur) args.push(cur);
-  return args;
-}
-
-function parseEnvFile(filePath, target) {
-  let content;
-  try {
-    content = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return;
-  }
-  for (const raw of content.replace(/\\\r?\n/g, '').split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-    const eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    const key = line.slice(0, eq).trim();
-    let val = line.slice(eq + 1).trim();
-    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-      val = val.slice(1, -1);
-    }
-    target[key] = val;
-  }
-}
-
-function parseServiceUnit(content, state) {
-  const lines = content.replace(/\\\r?\n/g, ' ').split(/\r?\n/);
-  let inService = false;
-  for (const raw of lines) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#') || line.startsWith(';')) continue;
-    const sec = /^\[(.+)\]$/.exec(line);
-    if (sec) {
-      inService = sec[1] === 'Service';
-      continue;
-    }
-    if (!inService) continue;
-    const execMatch = /^ExecStart\s*=\s*(.*)$/.exec(line);
-    if (execMatch) {
-      const val = execMatch[1].trim();
-      if (!val) state.execStarts = [];
-      else state.execStarts.push(val);
-      continue;
-    }
-    const envFileMatch = /^EnvironmentFile\s*=\s*(.*)$/.exec(line);
-    if (envFileMatch) {
-      const val = envFileMatch[1].trim();
-      if (!val) state.envFiles = [];
-      else state.envFiles.push(val);
-      continue;
-    }
-    const envMatch = /^Environment\s*=\s*(.*)$/.exec(line);
-    if (envMatch) {
-      const val = envMatch[1].trim();
-      if (!val) state.envAssignments = [];
-      else state.envAssignments.push(...splitUnitArgs(val));
-      continue;
-    }
-    const wdMatch = /^WorkingDirectory\s*=\s*(.*)$/.exec(line);
-    if (wdMatch) {
-      state.workingDirectory = wdMatch[1].trim().replace(/^-/, '');
-    }
-  }
-}
-
-function parseEnvAssignments(entries, target) {
-  for (const pair of entries) {
-    const eq = pair.indexOf('=');
-    if (eq > 0) target[pair.slice(0, eq)] = pair.slice(eq + 1);
-  }
-}
-
-function resolveEffectiveStateDir({ execStarts, envAssignments, envFiles, managerEnv = {}, homeDir = os.homedir(), workingDirectory = '' }) {
-  // Apply systemd.exec(5) precedence: user-manager env -> Environment= -> EnvironmentFile= -> CLI --state-dir.
-  const effectiveEnv = { ...managerEnv };
-  parseEnvAssignments(envAssignments, effectiveEnv);
-  for (const file of envFiles) {
-    const cleaned = String(file ?? '').replace(/^-/, '');
-    if (cleaned) parseEnvFile(cleaned, effectiveEnv);
-  }
-
-  const effectiveHome = effectiveEnv.HOME || homeDir;
-  const fallbackStateDir =
-    effectiveEnv.MESSAGES_CONTROL_STATE ||
-    path.join(effectiveEnv.XDG_STATE_HOME || path.join(effectiveHome, '.local', 'state'), 'messages-control');
-  const rawWd = String(workingDirectory ?? '').replace(/^!/, '');
-  const baseDir = !rawWd || rawWd === '~' ? effectiveHome : rawWd.startsWith('~/') ? path.join(effectiveHome, rawWd.slice(2)) : rawWd;
-
-  const matches = [];
-  for (const argv of execStarts) {
-    if (!argv.includes('digest') || !argv.includes('--send')) continue;
-    let serviceStateDir = fallbackStateDir;
-    let invalid = false;
-    for (let i = 0; i < argv.length; i++) {
-      if (argv[i] === '--state-dir') {
-        if (i + 1 >= argv.length) {
-          invalid = true;
-          break;
-        }
-        serviceStateDir = argv[++i];
-      } else if (argv[i].startsWith('--state-dir=')) {
-        serviceStateDir = argv[i].slice('--state-dir='.length);
-      }
-    }
-    if (!invalid && serviceStateDir) matches.push(canonicalPath(serviceStateDir, baseDir));
-  }
-  return matches;
-}
-
-function unitFilesMatchStateDir(unitFiles, targetStateDir, { managerEnv = {}, homeDir = os.homedir(), workingDirectory } = {}) {
-  const state = { execStarts: [], envFiles: [], envAssignments: [], workingDirectory: workingDirectory ?? '' };
-  let readAny = false;
-  for (const file of unitFiles) {
-    if (!file) continue;
-    try {
-      const text = fs.readFileSync(file, 'utf8');
-      parseServiceUnit(text, state);
-      readAny = true;
-    } catch {}
-  }
-  if (!readAny || !state.execStarts.length) return false;
-  const expected = canonicalPath(targetStateDir);
-  const dirs = resolveEffectiveStateDir({
-    execStarts: state.execStarts.map(splitUnitArgs),
-    envAssignments: state.envAssignments,
-    envFiles: state.envFiles,
-    managerEnv,
-    homeDir,
-    workingDirectory: state.workingDirectory,
-  });
-  return dirs.includes(expected);
-}
-
-const ENABLED_UNIT_STATES = new Set(['enabled', 'enabled-runtime', 'linked', 'linked-runtime']);
-
-function parseJsonLines(text) {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .map((l) => JSON.parse(l));
-}
-
-async function busctlJson(args) {
-  const { stdout } = await execFileAsync('busctl', ['--user', '--json=short', ...args], {
-    timeout: 3000,
-    encoding: 'utf8',
-  });
-  return parseJsonLines(stdout);
-}
-
-// Queries systemd's live in-memory manager state via D-Bus JSON (busctl),
-// returning exact loaded ExecStart argv[], Environment, EnvironmentFiles,
-// WorkingDirectory, and raw user-manager Environment without shell-quoting.
-async function defaultQuerySystemd() {
-  try {
-    const [loadTimer] = await busctlJson([
-      'call',
-      'org.freedesktop.systemd1',
-      '/org/freedesktop/systemd1',
-      'org.freedesktop.systemd1.Manager',
-      'LoadUnit',
-      's',
-      'messages-control-digest.timer',
-    ]);
-    const timerPath = loadTimer?.data?.[0];
-    if (!timerPath) return { enabled: false };
-
-    const [timerProps, timerUnitProp] = await Promise.all([
-      busctlJson([
-        'get-property',
-        'org.freedesktop.systemd1',
-        timerPath,
-        'org.freedesktop.systemd1.Unit',
-        'LoadState',
-        'UnitFileState',
-        'ActiveEnterTimestamp',
-      ]),
-      busctlJson([
-        'get-property',
-        'org.freedesktop.systemd1',
-        timerPath,
-        'org.freedesktop.systemd1.Timer',
-        'Unit',
-      ]),
-    ]);
-    const loadState = timerProps[0]?.data;
-    const unitFileState = timerProps[1]?.data;
-    const activeEnterUs = Number(timerProps[2]?.data ?? 0);
-    if (loadState !== 'loaded' || !ENABLED_UNIT_STATES.has(unitFileState)) {
-      return { enabled: false };
-    }
-
-    const serviceUnit = timerUnitProp[0]?.data || 'messages-control-digest.service';
-    const [loadSvc] = await busctlJson([
-      'call',
-      'org.freedesktop.systemd1',
-      '/org/freedesktop/systemd1',
-      'org.freedesktop.systemd1.Manager',
-      'LoadUnit',
-      's',
-      serviceUnit,
-    ]);
-    const svcPath = loadSvc?.data?.[0];
-    if (!svcPath) return { enabled: false };
-
-    const [svcUnitProps, svcProps, mgrEnvProps] = await Promise.all([
-      busctlJson([
-        'get-property',
-        'org.freedesktop.systemd1',
-        svcPath,
-        'org.freedesktop.systemd1.Unit',
-        'LoadState',
-      ]),
-      busctlJson([
-        'get-property',
-        'org.freedesktop.systemd1',
-        svcPath,
-        'org.freedesktop.systemd1.Service',
-        'ExecStart',
-        'Environment',
-        'EnvironmentFiles',
-        'WorkingDirectory',
-      ]),
-      busctlJson([
-        'get-property',
-        'org.freedesktop.systemd1',
-        '/org/freedesktop/systemd1',
-        'org.freedesktop.systemd1.Manager',
-        'Environment',
-      ]),
-    ]);
-    if (svcUnitProps[0]?.data !== 'loaded') return { enabled: false };
-
-    const execStarts = (svcProps[0]?.data ?? []).map((entry) => entry?.[1]).filter(Array.isArray);
-    const envAssignments = Array.isArray(svcProps[1]?.data) ? svcProps[1].data : [];
-    const envFiles = (svcProps[2]?.data ?? []).map((entry) => entry?.[0]).filter(Boolean);
-    const workingDirectory = typeof svcProps[3]?.data === 'string' ? svcProps[3].data : '';
-    const managerEnv = {};
-    parseEnvAssignments(Array.isArray(mgrEnvProps[0]?.data) ? mgrEnvProps[0].data : [], managerEnv);
-
-    return {
-      enabled: true,
-      execStarts,
-      envAssignments,
-      envFiles,
-      workingDirectory,
-      managerEnv,
-      sinceMs: Number.isFinite(activeEnterUs) && activeEnterUs > 0 ? Math.floor(activeEnterUs / 1000) : null,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function timerWantMtimeMs(unitDir) {
-  if (!unitDir) return null;
-  const timerWant = path.join(unitDir, 'timers.target.wants', 'messages-control-digest.timer');
-  try {
-    if (fs.realpathSync(timerWant) === '/dev/null') return null;
-    return Math.floor(fs.lstatSync(timerWant).mtimeMs);
-  } catch {
-    return null;
-  }
-}
-
-// Resolves whether messages-control-digest.timer is enabled to run
-// `digest --send` against targetStateDir, using systemd's loaded in-memory
-// unit and user-manager environment (or unit files + drop-ins when systemd is
-// unavailable). Remains true even if an enabled timer has stopped or failed so
-// staleness alerts still fire.
-export async function inspectDigestSchedule(targetStateDir, { unitDir, homeDir = os.homedir(), managerEnv, querySystemd = defaultQuerySystemd } = {}) {
-  if (!targetStateDir) return { scheduled: false, sinceMs: null };
-  const live = querySystemd ? await querySystemd() : null;
-  if (live) {
-    if (!live.enabled) return { scheduled: false, sinceMs: null };
-    const expected = canonicalPath(targetStateDir);
-    const dirs = resolveEffectiveStateDir({
-      execStarts: live.execStarts ?? [],
-      envAssignments: live.envAssignments ?? [],
-      envFiles: live.envFiles ?? [],
-      managerEnv: live.managerEnv ?? {},
-      homeDir,
-      workingDirectory: live.workingDirectory ?? '',
-    });
-    const matches = dirs.includes(expected);
-    const sinceMs = live.sinceMs ?? timerWantMtimeMs(unitDir);
-    return { scheduled: matches, sinceMs: matches ? sinceMs : null };
-  }
-  if (!unitDir) return { scheduled: false, sinceMs: null };
-  const sinceMs = timerWantMtimeMs(unitDir);
-  if (sinceMs == null) return { scheduled: false, sinceMs: null };
-  const dropInDir = path.join(unitDir, 'messages-control-digest.service.d');
-  let dropIns = [];
-  try {
-    dropIns = fs
-      .readdirSync(dropInDir)
-      .filter((f) => f.endsWith('.conf'))
-      .sort()
-      .map((f) => path.join(dropInDir, f));
-  } catch {}
-  const unitFiles = [path.join(unitDir, 'messages-control-digest.service'), ...dropIns];
-  const matches = unitFilesMatchStateDir(unitFiles, targetStateDir, {
-    managerEnv: managerEnv ?? { HOME: homeDir },
-    homeDir,
-  });
-  return { scheduled: matches, sinceMs: matches ? sinceMs : null };
-}
-
-// Persists a durable schedule-start timestamp in state.db so first-delivery
-// deadlines survive watcher restarts and start when the schedule activates.
-export function recordDigestSchedule(db, status, now = Date.now()) {
-  const scheduled = typeof status === 'object' && status !== null ? Boolean(status.scheduled) : Boolean(status);
-  const hint = typeof status === 'object' && status !== null && typeof status.sinceMs === 'number' ? status.sinceMs : null;
-  let stored = db.getMeta('digestScheduledSince');
-  if (scheduled) {
-    if (typeof stored !== 'number' || stored <= 0) {
-      stored = hint && hint > 0 && hint <= now ? hint : now;
-      db.setMeta('digestScheduledSince', stored);
-    }
-    return { scheduled: true, sinceMs: stored };
-  }
-  if (stored != null) db.setMeta('digestScheduledSince', null);
-  return { scheduled: false, sinceMs: 0 };
-}
 
 // "24h", "7d", "90m" → milliseconds.
 export function parseSince(text, fallback = '24h') {
   const m = /^(\d+)([hdm])$/.exec(String(text ?? fallback).trim());
   if (!m) throw new Error(`--since wants a number and h, d or m (got "${text}")`);
   return Number(m[1]) * PERIOD[m[2]];
+}
+
+// Parses settings.digest ({ time: "HH:MM", timeZone?: "America/Los_Angeles" }).
+// Returns null when disabled (empty time), or { time: "HH:MM", hour, minute, timeZone }.
+export function parseDigestScheduleConfig(cfg) {
+  if (cfg == null) return null;
+  if (typeof cfg !== 'object' || Array.isArray(cfg)) throw new Error('digest config must be an object');
+  const rawTime = String(cfg.time ?? '').trim();
+  const timeZone = String(cfg.timeZone ?? '').trim();
+  if (timeZone) {
+    try {
+      new Intl.DateTimeFormat('en-CA', { timeZone });
+    } catch {
+      throw new Error(`digest.timeZone is not a valid IANA time zone (got "${timeZone}")`);
+    }
+  }
+  if (!rawTime) return null;
+  const m = /^(\d{1,2}):(\d{2})$/.exec(rawTime);
+  if (!m) throw new Error(`digest.time wants HH:MM (got "${rawTime}")`);
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) throw new Error(`digest.time wants 00:00–23:59 (got "${rawTime}")`);
+  return {
+    time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`,
+    hour,
+    minute,
+    timeZone,
+  };
+}
+
+export function localDayAndTime(ms, timeZone = '') {
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timeZone || undefined,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(new Date(ms)).map((p) => [p.type, p.value]));
+  return {
+    day: `${parts.year}-${parts.month}-${parts.day}`,
+    hour: Number(parts.hour) % 24,
+    minute: Number(parts.minute),
+  };
+}
+
+// Synchronizes the durable digestSchedule record in state.db with config.
+// When newly enabled or rescheduled, anchors `since` to now and marks today
+// already elapsed if the target time already passed today so enabling mid-day
+// waits for the next scheduled slot instead of blasting immediately.
+export function syncDigestSchedule(db, scheduleConfig, now = Date.now()) {
+  const stored = db.getMeta('digestSchedule');
+  if (!scheduleConfig) {
+    if (stored != null) db.setMeta('digestSchedule', null);
+    return null;
+  }
+  if (
+    stored &&
+    stored.enabled === true &&
+    stored.time === scheduleConfig.time &&
+    (stored.timeZone ?? '') === scheduleConfig.timeZone &&
+    typeof stored.since === 'number' &&
+    stored.since > 0
+  ) {
+    return stored;
+  }
+  const local = localDayAndTime(now, scheduleConfig.timeZone);
+  const nowMins = local.hour * 60 + local.minute;
+  const targetMins = scheduleConfig.hour * 60 + scheduleConfig.minute;
+  const next = {
+    enabled: true,
+    since: now,
+    time: scheduleConfig.time,
+    timeZone: scheduleConfig.timeZone,
+    lastDay: nowMins >= targetMins ? local.day : null,
+  };
+  db.setMeta('digestSchedule', next);
+  return next;
+}
+
+// Runs the configured daily digest inside the watcher process, recording
+// scheduled delivery metrics in state.db without logging private digest text.
+export function startDigestScheduler({
+  db,
+  settings,
+  notify,
+  now = () => Date.now(),
+  intervalMs = 30000,
+  log = (msg) => console.log(msg),
+  warn = (msg) => console.warn(msg),
+}) {
+  const scheduleConfig = parseDigestScheduleConfig(settings?.digest);
+  syncDigestSchedule(db, scheduleConfig, now());
+  if (!scheduleConfig) return { stop() {}, tick: async () => false };
+
+  let stopped = false;
+  let running = false;
+
+  async function tick() {
+    if (stopped || running) return false;
+    const startedAt = now();
+    const state = syncDigestSchedule(db, scheduleConfig, startedAt);
+    if (!state) return false;
+    const local = localDayAndTime(startedAt, scheduleConfig.timeZone);
+    if (local.hour * 60 + local.minute < scheduleConfig.hour * 60 + scheduleConfig.minute) return false;
+    if (state.lastDay === local.day) return false;
+
+    running = true;
+    try {
+      const text = digestText(db, { since: startedAt - 86400000, now: startedAt });
+      const sent = await notify(settings, 'digest', text);
+      const delivered = sent.filter(Boolean).length;
+      const ok = sent.length > 0 && delivered === sent.length;
+      const doneAt = now();
+      if (!stopped) {
+        db.setMeta('lastDigest', { time: doneAt, ok, delivered, total: sent.length });
+        if (ok) db.setMeta('lastDigestSuccess', doneAt);
+        db.setMeta('digestSchedule', { ...state, lastDay: local.day });
+      }
+      if (ok) log(`daily digest sent via ${delivered} channel(s)`);
+      else if (!sent.length) warn('daily digest failed: no notify channel configured');
+      else warn(`daily digest failed (${delivered}/${sent.length} channel(s) succeeded)`);
+      return true;
+    } catch (err) {
+      const doneAt = now();
+      if (!stopped) {
+        db.setMeta('lastDigest', { time: doneAt, ok: false, delivered: 0, total: 0 });
+        db.setMeta('digestSchedule', { ...state, lastDay: local.day });
+      }
+      warn(`daily digest failed: ${err?.message ?? String(err)}`);
+      return true;
+    } finally {
+      running = false;
+    }
+  }
+
+  const timer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  timer.unref?.();
+  void tick();
+
+  return {
+    stop() {
+      stopped = true;
+      clearInterval(timer);
+    },
+    tick,
+  };
 }
 
 export function digestText(db, { since = Date.now() - 86400000, now = Date.now(), maxLines = 25 } = {}) {

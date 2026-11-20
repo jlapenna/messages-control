@@ -50,6 +50,7 @@ The default locations also respect `XDG_CONFIG_HOME` and `XDG_STATE_HOME`.
 | `openPictureThreads` | `true` | open picture threads so the model sees them (marks them read) |
 | `unsubscribeMarketing` | `false` | reply `unsubscribeText` (`STOP`) to a marketing sender before trashing its thread |
 | `notify` | | notification channels (`telegram`, `command`) and event filter; see [Notifications and the daily digest](#notifications-and-the-daily-digest) |
+| `digest` | `{ "time": "", "timeZone": "" }` | standalone: optional in-process daily digest schedule (`time`: `"HH:MM"`, `timeZone`: optional IANA zone); empty `time` disables scheduled digests |
 | `messageRetentionDays` | `30` | standalone: days new-message previews are kept for `/api/messages`; `0` records none |
 | `prompt` | see `settings.js` | the classifier instructions |
 
@@ -127,8 +128,10 @@ block, delete or archive), `pairing-approval`, `unpaired`, `llm-failing`,
 
 `messages-control digest [--since 7d] [--send]` summarises the events
 table: counts, each action with the model's reason, what dry run held,
-errors. `install-service --digest 08:00` adds a systemd timer that sends it
-daily.
+errors (manual CLI runs do not alter scheduled digest metrics). To send a
+daily digest automatically from the watcher, set `"digest": { "time": "08:00" }`
+(with optional `"timeZone"`, e.g. `"America/Los_Angeles"`) in `config.json`, or
+pass `--digest 08:00` to `install-service`.
 
 ## API, dashboard and monitoring
 
@@ -142,8 +145,8 @@ other `Host` headers are refused; `/api/*` keeps its token.
 - `/metrics` — Prometheus text, no token: `messages_control_healthy`,
   `messages_control_paired`, `messages_control_dry_run`,
   `messages_control_last_scan_timestamp_seconds`,
-  `messages_control_digest_scheduled` (`1` only when the daily digest systemd
-  timer is enabled and targets this watcher's state directory),
+  `messages_control_digest_scheduled` (`1` when `digest.time` is configured on
+  this watcher),
   `messages_control_digest_scheduled_since_timestamp_seconds`,
   `messages_control_digest_last_run_timestamp_seconds`,
   `messages_control_digest_last_success_timestamp_seconds`,
