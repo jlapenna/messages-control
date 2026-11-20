@@ -292,18 +292,19 @@ WantedBy=default.target
   console.log(`Wrote ${file}`);
   if (flags.digest) {
     const parsed = parseDigestScheduleConfig({ time: flags.digest });
+    if (!parsed) throw new Error('--digest wants HH:MM');
     const config = readConfig();
     writeConfig({ ...config, digest: { ...(config.digest ?? {}), time: parsed.time } });
-    clearDigestScheduleMeta();
     console.log(`Scheduled daily digest at ${parsed.time} in ${CONFIG_FILE}`);
     removeLegacyDigestUnits(path.dirname(file));
   }
   if (flags.enable) {
     execFileSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'inherit' });
-    execFileSync('systemctl', ['--user', 'enable', '--now', 'messages-control'], { stdio: 'inherit' });
+    execFileSync('systemctl', ['--user', 'enable', 'messages-control'], { stdio: 'inherit' });
+    execFileSync('systemctl', ['--user', 'restart', 'messages-control'], { stdio: 'inherit' });
     console.log('Started. Logs: journalctl --user -fu messages-control');
   } else {
-    console.log('Start it: systemctl --user daemon-reload && systemctl --user enable --now messages-control');
+    console.log('Start it: systemctl --user daemon-reload && systemctl --user enable messages-control && systemctl --user restart messages-control');
   }
   console.log('To keep it running while logged out: loginctl enable-linger (WSL: sudo loginctl enable-linger $USER)');
 }

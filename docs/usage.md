@@ -247,7 +247,9 @@ loginctl enable-linger        # optional: keep running while logged out
 
 The service uses your configured mode and dry-run setting. Add `--live` when
 installing it to enable automatic blocking and deletion. Add `--digest 08:00`
-to install a daily digest timer; configure a notification destination first.
+to set `digest.time` in `config.json` so the watcher sends a daily digest
+in-process (and remove any legacy digest timer units); configure a notification
+destination first.
 
 If pairing is lost, the watcher tries to restore it using the saved Google
 session and requests approval on your phone. Check Google Messages → Device
@@ -263,7 +265,9 @@ the classifier again after a pause that doubles from 1 to 30 minutes
 tries; each call that reaches the classifier uses one try of its thread.
 A new thread from today or yesterday is never given up on: it is tried again
 until the classifier answers.
-Use `messages-control uninstall-service` to remove the service and digest timer.
+Use `messages-control uninstall-service` to remove the service, clean up any
+legacy digest timer units, and clear `digestSchedule` metadata in `state.db`
+(`digest.time` in `config.json` is left untouched).
 
 ## Storage
 
