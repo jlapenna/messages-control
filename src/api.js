@@ -300,6 +300,9 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
     const { lastScan } = store.get('lastScan');
     const lastDigest = db.getMeta('lastDigest');
     const lastDigestSuccess = db.getMeta('lastDigestSuccess');
+    const digestSchedule = db.getMeta('digestSchedule');
+    const scheduled = Boolean(digestSchedule?.enabled);
+    const scheduledSinceMs = scheduled && typeof digestSchedule?.since === 'number' ? digestSchedule.since : 0;
     const lines = [
       '# HELP messages_control_up 1 while the watcher process runs.',
       '# TYPE messages_control_up gauge',
@@ -316,15 +319,21 @@ export function startApi({ settings, bind = '127.0.0.1', port, token, hosts = []
       '# HELP messages_control_last_scan_timestamp_seconds When the page last finished a scan.',
       '# TYPE messages_control_last_scan_timestamp_seconds gauge',
       `messages_control_last_scan_timestamp_seconds ${lastScan ? Math.floor(lastScan.time / 1000) : 0}`,
-      '# HELP messages_control_digest_last_run_timestamp_seconds When digest --send last attempted delivery (0 if never).',
+      '# HELP messages_control_digest_scheduled 1 when the watcher has a daily digest schedule configured (digest.time).',
+      '# TYPE messages_control_digest_scheduled gauge',
+      `messages_control_digest_scheduled ${scheduled ? 1 : 0}`,
+      '# HELP messages_control_digest_scheduled_since_timestamp_seconds Unix timestamp when the current daily digest schedule was enabled or changed (0 if not scheduled).',
+      '# TYPE messages_control_digest_scheduled_since_timestamp_seconds gauge',
+      `messages_control_digest_scheduled_since_timestamp_seconds ${scheduledSinceMs ? Math.floor(scheduledSinceMs / 1000) : 0}`,
+      '# HELP messages_control_digest_last_run_timestamp_seconds When the watcher last attempted a scheduled daily digest delivery (0 if never).',
       '# TYPE messages_control_digest_last_run_timestamp_seconds gauge',
       `messages_control_digest_last_run_timestamp_seconds ${lastDigest?.time ? Math.floor(lastDigest.time / 1000) : 0}`,
-      '# HELP messages_control_digest_last_success_timestamp_seconds When digest --send last delivered to every configured channel (0 if never).',
+      '# HELP messages_control_digest_last_success_timestamp_seconds When the watcher last delivered a scheduled daily digest to every configured channel (0 if never).',
       '# TYPE messages_control_digest_last_success_timestamp_seconds gauge',
       `messages_control_digest_last_success_timestamp_seconds ${typeof lastDigestSuccess === 'number' ? Math.floor(lastDigestSuccess / 1000) : 0}`,
       ...(lastDigest
         ? [
-            '# HELP messages_control_digest_last_ok 1 when the last digest --send succeeded, 0 when it failed.',
+            '# HELP messages_control_digest_last_ok 1 when the last scheduled daily digest succeeded, 0 when it failed.',
             '# TYPE messages_control_digest_last_ok gauge',
             `messages_control_digest_last_ok ${lastDigest.ok ? 1 : 0}`,
           ]

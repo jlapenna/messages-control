@@ -56,6 +56,10 @@ export const DEFAULTS = {
   // hosts: the extra names requests may carry then (the proxy's public name,
   // the machine's tailnet name). /api/* stays behind the token either way.
   api: { bind: '127.0.0.1', port: 7373, token: '', hosts: [] },
+  // Standalone only: optional daily digest schedule run inside the watcher.
+  // time: "HH:MM" (24-hour, e.g. "08:00"); empty disables scheduled digests.
+  // timeZone: optional IANA zone (e.g. "America/Los_Angeles"); empty uses host local time.
+  digest: { time: '', timeZone: '' },
   // Standalone only: every new message in the conversation list (saved
   // contacts included) is recorded for /api/messages and its stream, and
   // kept this many days. 0 records nothing.
