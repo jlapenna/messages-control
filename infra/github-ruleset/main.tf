@@ -64,7 +64,7 @@ resource "github_repository_ruleset" "protect_main" {
 
       required_check {
         context        = "LCARS review"
-        integration_id = 15368 # GitHub Actions
+        integration_id = 4457090 # Agent LCARS
       }
       required_check {
         context = "gitleaks"
