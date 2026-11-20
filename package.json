@@ -44,7 +44,7 @@
     "LICENSE"
   ],
   "devDependencies": {
-    "@jlapenna/repo-tools": "github:jlapenna/repo-tools#v4.7.3",
+    "@jlapenna/repo-tools": "github:jlapenna/repo-tools#v4.10.0",
     "husky": "^9.1.7"
   },
   "overrides": {
