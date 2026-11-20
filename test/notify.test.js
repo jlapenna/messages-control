@@ -46,3 +46,35 @@ test('a failing channel is reported, not thrown, and the event filter is honoure
   assert.deepEqual(await notify(telegram, 'action', 'x', { fetchImpl }), [false]);
   assert.deepEqual(await notify({ ...telegram, notify: { ...telegram.notify, events: [] } }, 'action', 'x', { fetchImpl }), []);
 });
+
+test('command channel awaits completion and passes MC_EVENT, MC_MESSAGE and MC_PHOTO', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-cmd-'));
+  const out = path.join(dir, 'receipt.json');
+  const script = path.join(dir, 'write.mjs');
+  fs.writeFileSync(
+    script,
+    `import fs from 'node:fs';
+setTimeout(() => {
+  fs.writeFileSync(${JSON.stringify(out)}, JSON.stringify({
+    event: process.env.MC_EVENT,
+    message: process.env.MC_MESSAGE,
+    photo: process.env.MC_PHOTO,
+  }));
+}, 80);
+`,
+  );
+  const res = await notify({ notify: { command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}` } }, 'digest', 'daily summary', { photo: '/tmp/p.png' });
+  assert.deepEqual(res, [true]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(out, 'utf8')), {
+    event: 'digest',
+    message: 'daily summary',
+    photo: '/tmp/p.png',
+  });
+});
+
+test('command channel reports non-zero exit and timeout as false without throwing', async () => {
+  const failed = await notify({ notify: { command: 'echo boom >&2; exit 2' } }, 'digest', 'x');
+  assert.deepEqual(failed, [false]);
+  const timedOut = await notify({ notify: { command: `${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 10000)"` } }, 'digest', 'x', { commandTimeoutMs: 100 });
+  assert.deepEqual(timedOut, [false]);
+});

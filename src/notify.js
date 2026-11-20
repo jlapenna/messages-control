@@ -28,13 +28,13 @@ export function wanted(settings, event) {
 }
 
 // Fire and forget: a notification never fails the thing it reports on.
-export async function notify(settings, event, message, { photo = null, fetchImpl = fetch } = {}) {
+export async function notify(settings, event, message, { photo = null, fetchImpl = fetch, commandTimeoutMs = 65000 } = {}) {
   if (!wanted(settings, event)) return [];
   const results = [];
   for (const ch of channels(settings)) {
     try {
       if (ch.kind === 'telegram') results.push(await telegram(ch, message, photo, fetchImpl));
-      else results.push(command(ch, event, message, photo));
+      else results.push(await command(ch, event, message, photo, commandTimeoutMs));
     } catch (err) {
       console.warn(`notify (${ch.kind}) failed:`, err.message);
       results.push(false);
@@ -64,13 +64,49 @@ async function telegram({ token, chatId }, message, photo, fetchImpl) {
   return true;
 }
 
-function command({ command }, event, message, photo) {
-  const child = spawn('sh', ['-c', command], {
-    env: { ...process.env, MC_EVENT: event, MC_MESSAGE: message, MC_PHOTO: photo ?? '' },
-    stdio: 'ignore',
-    detached: true,
+function killChildGroup(child, signal) {
+  try {
+    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal);
+    else child.kill(signal);
+  } catch {}
+}
+
+function command({ command }, event, message, photo, timeoutMs = 65000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('sh', ['-c', command], {
+      env: { ...process.env, MC_EVENT: event, MC_MESSAGE: message, MC_PHOTO: photo ?? '' },
+      stdio: ['ignore', 'ignore', 'pipe'],
+      detached: process.platform !== 'win32',
+    });
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => {
+      if (stderr.length < 512) stderr += chunk.toString('utf8').slice(0, 512 - stderr.length);
+    });
+    let settled = false;
+    let killTimer = null;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => {
+      killChildGroup(child, 'SIGTERM');
+      killTimer = setTimeout(() => killChildGroup(child, 'SIGKILL'), 2000);
+      killTimer.unref();
+      finish(reject, new Error(`command timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref();
+    child.on('error', (err) => {
+      clearTimeout(killTimer);
+      finish(reject, err);
+    });
+    child.on('close', (code, signal) => {
+      clearTimeout(killTimer);
+      if (code === 0) return finish(resolve, true);
+      const why = code != null ? `exit ${code}` : `signal ${signal}`;
+      const detail = stderr.trim().slice(0, 200);
+      finish(reject, new Error(detail ? `${why}: ${detail}` : why));
+    });
   });
-  child.on('error', (err) => console.warn('notify command failed:', err.message));
-  child.unref();
-  return true;
 }

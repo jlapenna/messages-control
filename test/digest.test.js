@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,4 +35,25 @@ test('digest summarises actions, dry-run holds and errors', () => {
   assert.doesNotMatch(text, /too old/);
   assert.equal(digestText(db, { since: now - 100, now }).split('\n')[1], 'Nothing to report.');
   db.close();
+});
+
+test('digest --send awaits notify.command and fails non-zero when delivery fails', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mc-digest-cli-'));
+  const cfg = path.join(dir, 'config.json');
+  const receipt = path.join(dir, 'sent.txt');
+  const writer = path.join(dir, 'write.mjs');
+  fs.writeFileSync(writer, `import fs from 'node:fs'; setTimeout(() => fs.writeFileSync(${JSON.stringify(receipt)}, process.env.MC_EVENT + ':' + process.env.MC_MESSAGE), 80);`);
+  fs.writeFileSync(cfg, JSON.stringify({ notify: { events: ['digest'], command: `${JSON.stringify(process.execPath)} ${JSON.stringify(writer)}` } }));
+  const env = { ...process.env, MESSAGES_CONTROL_CONFIG: cfg, MESSAGES_CONTROL_STATE: path.join(dir, 'state') };
+  const bin = path.resolve('bin/messages-control.js');
+
+  const out = execFileSync(process.execPath, [bin, 'digest', '--send'], { env, encoding: 'utf8' });
+  assert.match(out, /sent via 1 channel\(s\)/);
+  assert.match(fs.readFileSync(receipt, 'utf8'), /^digest:Messages Control, last 24 h:/);
+
+  fs.writeFileSync(cfg, JSON.stringify({ notify: { events: ['digest'], command: 'exit 3' } }));
+  assert.throws(
+    () => execFileSync(process.execPath, [bin, 'digest', '--send'], { env, encoding: 'utf8', stdio: 'pipe' }),
+    (err) => err.status === 1 && /digest delivery failed \(0\/1 channel\(s\) succeeded\)/.test(err.stderr),
+  );
 });

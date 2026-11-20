@@ -445,7 +445,16 @@ async function main() {
     console.log(text);
     if (flags.send) {
       const sent = await sendNotification(settings, 'digest', text);
-      console.log(sent.length ? `sent via ${sent.length} channel(s)` : 'no notify channel configured');
+      const delivered = sent.filter(Boolean).length;
+      if (!sent.length) {
+        console.log('no notify channel configured');
+      } else if (delivered === sent.length) {
+        console.log(`sent via ${delivered} channel(s)`);
+      } else {
+        console.error(`digest delivery failed (${delivered}/${sent.length} channel(s) succeeded)`);
+        db.close();
+        process.exit(EXIT_ERROR);
+      }
     }
     return;
   }
@@ -486,10 +495,12 @@ async function main() {
     await context.close().catch(() => {});
     process.exit(code);
   };
-  const fatal = (event, message, code) => {
-    if (exiting) return; // our own shutdown closes the browser too
+  let failing = false;
+  const fatal = async (event, message, code) => {
+    if (exiting || failing) return; // our own shutdown closes the browser too
+    failing = true;
     console.error(message);
-    notify(settings, event, message);
+    await sendNotification(settings, event, message).catch((err) => console.warn('notify failed:', err.message));
     return shutdown(code);
   };
   process.on('SIGINT', () => shutdown());
