@@ -13,3 +13,4 @@ pairing-emoji.png
 # Installed from pinned npm devDependencies by tools/sync-package-skills.mjs.
 /.agents/skills/modern-web-guidance/
 /.agents/skills/chrome-extensions/
+/.agents/skills/.sync-*/
