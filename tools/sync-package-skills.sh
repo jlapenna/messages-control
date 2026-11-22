@@ -9,48 +9,87 @@
 # `npx -y modern-web-guidance@latest`, which executes whatever npm's latest
 # tag points at before Renovate, CI and review qualify it, and its CLI sends
 # search queries and agent details to Google by default (LCARS review of
-# jlapenna/messages-control#135). Every text file in each copy is rewritten
-# to run the copied, lockfile-pinned CLI with DISABLE_TELEMETRY=1; `retrieve`
-# serves guides from the copy, so retrieved cross-references are pinned too.
-# The sync fails if any unpinned invocation survives. To opt in to telemetry,
-# run the CLI yourself without DISABLE_TELEMETRY.
+# jlapenna/messages-control#135). The copy is a self-contained CLI that serves
+# guides from its own directory, so every text file in it is rewritten to run
+# that copied, lockfile-pinned CLI with DISABLE_TELEMETRY=1, and SKILL.md's
+# npx/pnpx/network advice is replaced. The sync fails closed if an unpinned
+# invocation survives. To opt in to telemetry, run the CLI without
+# DISABLE_TELEMETRY.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-pinned_cli='DISABLE_TELEMETRY=1 node "$(git rev-parse --show-toplevel)/.agents/skills/modern-web-guidance/modern-web.mjs"'
-unpinned_re='modern-web-guidance@(latest|next|beta|canary|[0-9^~])'
+package=modern-web-guidance
+skills=(modern-web-guidance chrome-extensions)
+
+launcher='"$(git rev-parse --show-toplevel)/.agents/skills/modern-web-guidance/modern-web.mjs"'
+pinned_cli="DISABLE_TELEMETRY=1 node $launcher"
+# Bundled JavaScript gets a quote-free form so its string literals stay valid.
 pinned_cli_js='DISABLE_TELEMETRY=1 node $(git rev-parse --show-toplevel)/.agents/skills/modern-web-guidance/modern-web.mjs'
 runner_re='(npx( -y| --yes)?|pnpx|pnpm (dlx|exec)|bunx|yarn dlx) modern-web-guidance(@[A-Za-z0-9._-]+)?'
+# npm dist tags and versions; Claude plugin IDs in the CLI's help text, such
+# as modern-web-guidance@googlechrome, are not npm specs.
+unpinned_re='modern-web-guidance@(latest|next|beta|canary|[0-9^~])'
 
-# <package> <skill directory under the package's skills/>
-sync_skill() {
-  local pkg="node_modules/$1" src="node_modules/$1/skills/$2" dest=".agents/skills/$2"
-  rm -rf "$dest"
-  # Without the package (for example a production install that omits
-  # devDependencies) the skill is simply absent, never a stale copy.
-  [ -d "$pkg" ] || return 0
-  if [ ! -f "$src/SKILL.md" ]; then
-    echo "sync-package-skills: $1 no longer ships skills/$2; update tools/sync-package-skills.sh" >&2
-    exit 1
+fail() {
+  echo "sync-package-skills: $*" >&2
+  exit 1
+}
+
+# Clear every managed copy before validating any source, so a failed or
+# partial sync never leaves an older skill discoverable.
+for skill in "${skills[@]}"; do
+  rm -rf ".agents/skills/$skill"
+done
+
+# Without the package (for example a production install that omits
+# devDependencies) the skills are simply absent.
+[ -d "node_modules/$package" ] || exit 0
+
+for skill in "${skills[@]}"; do
+  [ -f "node_modules/$package/skills/$skill/SKILL.md" ] ||
+    fail "$package no longer ships skills/$skill; update tools/sync-package-skills.sh"
+done
+
+pin_runner_section() {
+  local skill_md="$1" tmp="$1.tmp"
+  awk -v cli="$pinned_cli" '
+    /^## Using npx \/ pnpx$/ {
+      print "## Running the pinned CLI"
+      print ""
+      print "- This copy was installed by `tools/sync-package-skills.sh` from the lockfile-pinned `modern-web-guidance` devDependency. Run it only as `" cli " ...`. It works offline; do not request network access for it."
+      print "- Never run `modern-web-guidance` through a package runner or download it, and do not update it yourself: Renovate bumps the pinned version."
+      print "- If the file is missing, run the repository install (`npm ci`) instead of fetching the package."
+      print "- Telemetry is disabled with `DISABLE_TELEMETRY=1`; keep it set."
+      skipping = 1
+      replaced = 1
+      next
+    }
+    skipping && /^## / { skipping = 0; print "" }
+    !skipping { print }
+    END { if (!replaced) exit 3 }
+  ' "$skill_md" >"$tmp" || fail "$skill_md has no '## Using npx / pnpx' section to replace; update tools/sync-package-skills.sh"
+  mv "$tmp" "$skill_md"
+  sed -i 's/directly with `npx` using/using/' "$skill_md"
+  if grep -qwE 'npx|pnpx|bunx|dlx' "$skill_md"; then
+    fail "$skill_md still recommends a package runner; extend the rewrite"
   fi
+}
+
+for skill in "${skills[@]}"; do
+  dest=".agents/skills/$skill"
   mkdir -p .agents/skills
-  cp -RL "$src" "$dest"
-  # -I skips binary files; -Z/-0 keep unusual file names intact (no match is
-  # not an error). Bundled
-  # JavaScript gets the quote-free form so its string literals stay valid.
+  cp -RL "node_modules/$package/skills/$skill" "$dest"
+  # -I skips binary files; -Z/-0 keep unusual file names intact; no match is
+  # not an error.
   { grep -rlIZE --exclude='*.mjs' --exclude='*.js' "$runner_re" "$dest" || true; } |
     xargs -0 -r sed -i -E "s#$runner_re#$pinned_cli#g"
   { grep -rlIZE --include='*.mjs' --include='*.js' "$runner_re" "$dest" || true; } |
     xargs -0 -r sed -i -E "s#$runner_re#$pinned_cli_js#g"
-  # Fail closed on any surviving npm runner or registry spec (dist tag or
-  # version). Claude plugin IDs such as modern-web-guidance@googlechrome in
-  # the CLI's help text are not npm specs.
-  if grep -rqE "$runner_re|$unpinned_re" "$dest"; then
-    echo "sync-package-skills: $dest still runs an unpinned modern-web-guidance:" >&2
-    grep -rnE "$runner_re|$unpinned_re" "$dest" | head -5 >&2
-    exit 1
+  if [ "$skill" = "$package" ]; then
+    pin_runner_section "$dest/SKILL.md"
   fi
-}
-
-sync_skill modern-web-guidance modern-web-guidance
-sync_skill modern-web-guidance chrome-extensions
+  if grep -rqE "$runner_re|$unpinned_re" "$dest"; then
+    grep -rnE "$runner_re|$unpinned_re" "$dest" | head -5 >&2
+    fail "$dest still runs an unpinned $package"
+  fi
+done

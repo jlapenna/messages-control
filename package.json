@@ -43,7 +43,8 @@
     "policy.js",
     "settings.js",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "tools/sync-package-skills.sh"
   ],
   "devDependencies": {
     "@jlapenna/repo-tools": "github:jlapenna/repo-tools#v4.10.0",
