@@ -9,7 +9,8 @@
     "prepare": "husky",
     "test:integration": "node --test test/integration/*.test.js",
     "test:all": "npm test && npm run test:integration",
-    "test:desktop": "node --test desktop/test/*.test.cjs"
+    "test:desktop": "node --test desktop/test/*.test.cjs",
+    "postinstall": "bash tools/sync-package-skills.sh"
   },
   "repository": {
     "type": "git",
@@ -46,7 +47,8 @@
   ],
   "devDependencies": {
     "@jlapenna/repo-tools": "github:jlapenna/repo-tools#v4.10.0",
-    "husky": "^9.1.7"
+    "husky": "^9.1.7",
+    "modern-web-guidance": "1.0.1"
   },
   "overrides": {
     "nx@23.3.0": {
