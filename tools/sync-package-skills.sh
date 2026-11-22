@@ -23,8 +23,9 @@ skills=(modern-web-guidance chrome-extensions)
 
 launcher='"$(git rev-parse --show-toplevel)/.agents/skills/modern-web-guidance/modern-web.mjs"'
 pinned_cli="DISABLE_TELEMETRY=1 node $launcher"
-# Bundled JavaScript gets a quote-free form so its string literals stay valid.
-pinned_cli_js='DISABLE_TELEMETRY=1 node $(git rev-parse --show-toplevel)/.agents/skills/modern-web-guidance/modern-web.mjs'
+# Bundled JavaScript gets escaped quotes (\"), which every JS string form
+# reads as a plain double quote, so printed commands keep the path quoted.
+pinned_cli_js='DISABLE_TELEMETRY=1 node \\"$(git rev-parse --show-toplevel)/.agents/skills/modern-web-guidance/modern-web.mjs\\"'
 runner_re='(npx( -y| --yes)?|pnpx|pnpm (dlx|exec)|bunx|yarn dlx) modern-web-guidance(@[A-Za-z0-9._-]+)?'
 # npm dist tags and versions; Claude plugin IDs in the CLI's help text, such
 # as modern-web-guidance@googlechrome, are not npm specs.
@@ -32,6 +33,7 @@ unpinned_re='modern-web-guidance@(latest|next|beta|canary|[0-9^~])'
 
 fail() {
   echo "sync-package-skills: $*" >&2
+  rm -rf node_modules/.sync-package-skills
   exit 1
 }
 
@@ -58,7 +60,7 @@ pin_runner_section() {
       print ""
       print "- This copy was installed by `tools/sync-package-skills.sh` from the lockfile-pinned `modern-web-guidance` devDependency. Run it only as `" cli " ...`. It works offline; do not request network access for it."
       print "- Never run `modern-web-guidance` through a package runner or download it, and do not update it yourself: Renovate bumps the pinned version."
-      print "- If the file is missing, run the repository install (`npm ci`) instead of fetching the package."
+      print "- If the file is missing, the local CLI is unavailable. Follow the repository development skill on whether installing dependencies is in scope; otherwise report the CLI as unavailable. Never fetch the package instead."
       print "- Telemetry is disabled with `DISABLE_TELEMETRY=1`; keep it set."
       skipping = 1
       replaced = 1
@@ -75,9 +77,13 @@ pin_runner_section() {
   fi
 }
 
+# Stage, rewrite and validate every copy before exposing any of them, so a
+# rejected package never leaves a skill in the discovery directories.
+staging="node_modules/.sync-package-skills"
+rm -rf "$staging"
+mkdir -p "$staging"
 for skill in "${skills[@]}"; do
-  dest=".agents/skills/$skill"
-  mkdir -p .agents/skills
+  dest="$staging/$skill"
   cp -RL "node_modules/$package/skills/$skill" "$dest"
   # -I skips binary files; -Z/-0 keep unusual file names intact; no match is
   # not an error.
@@ -90,6 +96,12 @@ for skill in "${skills[@]}"; do
   fi
   if grep -rqE "$runner_re|$unpinned_re" "$dest"; then
     grep -rnE "$runner_re|$unpinned_re" "$dest" | head -5 >&2
-    fail "$dest still runs an unpinned $package"
+    rm -rf "$staging"
+    fail "$skill still runs an unpinned $package"
   fi
 done
+mkdir -p .agents/skills
+for skill in "${skills[@]}"; do
+  mv "$staging/$skill" ".agents/skills/$skill"
+done
+rm -rf "$staging"
