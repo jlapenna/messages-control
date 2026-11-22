@@ -10,7 +10,7 @@
     "test:integration": "node --test test/integration/*.test.js",
     "test:all": "npm test && npm run test:integration",
     "test:desktop": "node --test desktop/test/*.test.cjs",
-    "postinstall": "bash tools/sync-package-skills.sh"
+    "postinstall": "node tools/sync-package-skills.mjs"
   },
   "repository": {
     "type": "git",
@@ -44,7 +44,7 @@
     "settings.js",
     "README.md",
     "LICENSE",
-    "tools/sync-package-skills.sh"
+    "tools/sync-package-skills.mjs"
   ],
   "devDependencies": {
     "@jlapenna/repo-tools": "github:jlapenna/repo-tools#v4.10.0",
