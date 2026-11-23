@@ -62,8 +62,10 @@ resource "github_repository_ruleset" "protect_main" {
       strict_required_status_checks_policy = false
       do_not_enforce_on_create             = false
 
+      # The head-scoped check. A ruleset cannot see a check published only
+      # on the test merge commit (jlapenna/agent-lcars#3473).
       required_check {
-        context        = "LCARS review (merge candidate)"
+        context        = "LCARS review"
         integration_id = 4457090 # Agent LCARS
       }
       required_check {

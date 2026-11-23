@@ -19,7 +19,7 @@ vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 ## LCARS code review
 
 A maintainer can request a review with `/review`. The Agent LCARS App publishes
-the result on GitHub’s test merge commit using the [shared publisher](https://github.com/jlapenna/agent-lcars/blob/main/docs/published-actions.md).
+the result as `LCARS review` on the PR head using the [shared publisher](https://github.com/jlapenna/agent-lcars/blob/main/docs/published-actions.md).
 
 ## Tests
 
