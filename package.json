@@ -9,8 +9,7 @@
     "prepare": "husky",
     "test:integration": "node --test test/integration/*.test.js",
     "test:all": "npm test && npm run test:integration",
-    "test:desktop": "node --test desktop/test/*.test.cjs",
-    "postinstall": "node tools/sync-package-skills.mjs"
+    "test:desktop": "node --test desktop/test/*.test.cjs"
   },
   "repository": {
     "type": "git",
@@ -43,13 +42,11 @@
     "policy.js",
     "settings.js",
     "README.md",
-    "LICENSE",
-    "tools/sync-package-skills.mjs"
+    "LICENSE"
   ],
   "devDependencies": {
     "@jlapenna/repo-tools": "github:jlapenna/repo-tools#v4.10.0",
-    "husky": "^9.1.7",
-    "modern-web-guidance": "1.0.1"
+    "husky": "^9.1.7"
   },
   "overrides": {
     "nx@23.3.0": {
