@@ -18,29 +18,8 @@ vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## LCARS code review
 
-The installed LCARS app reviews pull requests. A maintainer can comment
-`/review` to request a review of the current commit, including a Renovate
-update. The Agent LCARS App publishes the `LCARS review (merge candidate)` check after the
-first passing verdict. A later blocking verdict changes that check to failure.
-A formal change request for the current comparison requires a qualifying
-LCARS approval or dismissal of the request before the check can pass. After a
-retarget, a change request without the new comparison receipt is provisional.
-A passing review with the current receipt clears that provisional request.
-The check is published on GitHub’s test merge commit after verifying both
-parents against the current base and head. A missing or stale test merge
-commit waits for reconciliation. The publisher never writes the candidate
-check on the PR head.
-
-Before evaluating the diff, read the PR head, base branch and latest
-`BASE_REF_CHANGED_EVENT` ID from GitHub GraphQL
-(`pullRequest.timelineItems(last: 1, itemTypes: [BASE_REF_CHANGED_EVENT])`).
-If the diff was already fetched, fetch it again after recording this identity.
-Use this comparison for every review pass. Recheck all three values before
-submitting. If any changed, review the new comparison before publishing a pass.
-For a retargeted PR, make the first line of the review body
-`<!-- lcars-review:base-event NODE_ID -->`, substituting
-the ID recorded before reading the diff. The repository workflow uses this
-receipt to distinguish reviews of different comparisons at the same head.
+A maintainer can request a review with `/review`. The Agent LCARS App publishes
+the result as `LCARS review` on the PR head using the [shared publisher](https://github.com/jlapenna/agent-lcars/blob/main/docs/published-actions.md).
 
 ## Tests
 
