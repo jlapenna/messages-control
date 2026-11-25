@@ -37,7 +37,7 @@
   "author": "Joe LaPenna",
   "overrides": {
     "@electron/get@^3.0.0": {
-      "global-agent": "4.1.7"
+      "global-agent": "4.1.8"
     },
     "minimatch@>=7.0.0 <11.0.1": "11.0.5"
   }
